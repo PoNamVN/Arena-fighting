@@ -1,0 +1,30 @@
+# Godot 4 specific ignores
+.godot/
+*.translation
+
+# Godot-specific export / temporary files
+*.tmp
+
+# Blender backup and autosave files
+*.blend1
+*.blend2
+*.blend3
+*.blend@
+*.blend@@
+*.blend@@@
+
+# OS specific files
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+.DS_Store
+
+# Logs & crash dumps
+*.log
+*.dmp
+
+# Environment / Secret tokens (if any)
+.env
+.env.*
+*.secret

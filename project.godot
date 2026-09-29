@@ -1,0 +1,11 @@
+; Engine configuration file.
+; It's best edited using the editor UI and not directly,
+; but it can also be edited by hand.
+
+config_version=5
+
+[application]
+
+config/name="Game_3D"
+config/features=PackedStringArray("4.3", "Forward Plus")
+config/icon="res://icon.svg"
