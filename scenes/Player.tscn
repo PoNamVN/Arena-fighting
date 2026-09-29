@@ -1,0 +1,67 @@
+[gd_scene load_steps=8 format=3 uid="uid://c5q0q5i3r8d1x"]
+
+[ext_resource type="Script" path="res://scripts/PlayerController.gd" id="1_controller"]
+[ext_resource type="Script" path="res://scripts/PlayerCombat.gd" id="2_combat"]
+
+[sub_resource type="CapsuleShape3D" id="CapsuleShape3D_body"]
+radius = 0.4
+height = 1.8
+
+[sub_resource type="CapsuleMesh" id="CapsuleMesh_body"]
+radius = 0.4
+height = 1.8
+
+[sub_resource type="BoxMesh" id="BoxMesh_visor"]
+size = Vector3(0.25, 0.15, 0.25)
+
+[sub_resource type="SphereShape3D" id="SphereShape3D_attack"]
+radius = 0.65
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_slash"]
+shading_mode = 0
+albedo_color = Color(1, 0.85, 0.2, 0.9)
+
+[sub_resource type="BoxMesh" id="BoxMesh_slash"]
+material = SubResource("StandardMaterial3D_slash")
+size = Vector3(1.2, 0.08, 0.35)
+
+[node name="Player" type="CharacterBody3D"]
+collision_layer = 2
+script = ExtResource("1_controller")
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.9, 0)
+shape = SubResource("CapsuleShape3D_body")
+
+[node name="Visuals" type="Node3D" parent="."]
+
+[node name="BodyMesh" type="MeshInstance3D" parent="Visuals"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.9, 0)
+mesh = SubResource("CapsuleMesh_body")
+
+[node name="FaceIndicator" type="MeshInstance3D" parent="Visuals"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.4, -0.35)
+mesh = SubResource("BoxMesh_visor")
+
+[node name="CameraPivot" type="Node3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.5, 0)
+
+[node name="SpringArm3D" type="SpringArm3D" parent="CameraPivot"]
+spring_length = 4.0
+margin = 0.2
+
+[node name="Camera3D" type="Camera3D" parent="CameraPivot/SpringArm3D"]
+current = true
+fov = 75.0
+
+[node name="PlayerCombat" type="Node3D" parent="."]
+script = ExtResource("2_combat")
+
+[node name="VisualSlashCue" type="Node3D" parent="PlayerCombat"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.9, -1.1)
+visible = false
+
+[node name="SlashMesh" type="MeshInstance3D" parent="PlayerCombat/VisualSlashCue"]
+mesh = SubResource("BoxMesh_slash")
+
+

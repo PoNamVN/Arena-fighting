@@ -1,0 +1,99 @@
+[gd_scene load_steps=12 format=3 uid="uid://dm8y2x7v4k1w0"]
+
+[ext_resource type="Script" path="res://scripts/TrainingDummy.gd" id="1_dummy"]
+[ext_resource type="Script" path="res://scripts/HealthComponent.gd" id="2_health"]
+
+[sub_resource type="CylinderShape3D" id="CylinderShape3D_body"]
+height = 1.8
+radius = 0.45
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_dummy"]
+albedo_color = Color(0.85, 0.45, 0.25, 1)
+roughness = 0.6
+
+[sub_resource type="CylinderMesh" id="CylinderMesh_body"]
+material = SubResource("StandardMaterial3D_dummy")
+top_radius = 0.45
+bottom_radius = 0.45
+height = 1.8
+
+[sub_resource type="SphereMesh" id="SphereMesh_head"]
+material = SubResource("StandardMaterial3D_dummy")
+radius = 0.35
+height = 0.7
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_base"]
+albedo_color = Color(0.3, 0.25, 0.2, 1)
+roughness = 0.8
+
+[sub_resource type="CylinderMesh" id="CylinderMesh_base"]
+material = SubResource("StandardMaterial3D_base")
+top_radius = 0.65
+bottom_radius = 0.7
+height = 0.2
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_bg"]
+bg_color = Color(0.12, 0.14, 0.16, 0.85)
+corner_radius_top_left = 3
+corner_radius_top_right = 3
+corner_radius_bottom_right = 3
+corner_radius_bottom_left = 3
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_fill"]
+bg_color = Color(0.2, 0.85, 0.35, 1)
+corner_radius_top_left = 3
+corner_radius_top_right = 3
+corner_radius_bottom_right = 3
+corner_radius_bottom_left = 3
+
+[sub_resource type="ViewportTexture" id="ViewportTexture_health"]
+viewport_path = NodePath("HealthBarViewport")
+
+[node name="TrainingDummy" type="StaticBody3D"]
+collision_layer = 4
+script = ExtResource("1_dummy")
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.9, 0)
+shape = SubResource("CylinderShape3D_body")
+
+[node name="Visuals" type="Node3D" parent="."]
+
+[node name="StandBase" type="MeshInstance3D" parent="Visuals"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.1, 0)
+mesh = SubResource("CylinderMesh_base")
+
+[node name="BodyMesh" type="MeshInstance3D" parent="Visuals"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.9, 0)
+mesh = SubResource("CylinderMesh_body")
+
+[node name="HeadMesh" type="MeshInstance3D" parent="Visuals"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 2.05, 0)
+mesh = SubResource("SphereMesh_head")
+
+[node name="HealthComponent" type="Node" parent="."]
+script = ExtResource("2_health")
+max_health = 100.0
+
+[node name="HealthBarViewport" type="SubViewport" parent="."]
+transparent_bg = true
+size = Vector2i(140, 22)
+render_target_update_mode = 3
+
+[node name="ProgressBar" type="ProgressBar" parent="HealthBarViewport"]
+custom_minimum_size = Vector2(140, 22)
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_override_styles/background = SubResource("StyleBoxFlat_bg")
+theme_override_styles/fill = SubResource("StyleBoxFlat_fill")
+value = 100.0
+show_percentage = true
+
+[node name="HealthBarSprite" type="Sprite3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 2.65, 0)
+billboard = 1
+texture = SubResource("ViewportTexture_health")
+pixel_size = 0.009
