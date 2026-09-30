@@ -29,16 +29,154 @@
 
 ---
 
-## Milestone 3: Low-Poly Arena & Blender MCP Pipeline [PENDING]
-- [ ] **Task 3.1**: Model low-poly arena environment in Blender via MCP.
-- [ ] **Task 3.2**: Export arena as `.glb` to `res://assets/models/arena.glb`.
-- [ ] **Task 3.3**: Create `Arena.tscn` in Godot with static collisions and directional light.
-- [ ] **Verification Gate**: Viewport screenshot in Blender + headless scene check in Godot.
+## Milestone 3: Low-Poly Arena & Blender MCP Pipeline [COMPLETED]
+- [x] **Task 3.1**: Model low-poly arena environment in Blender via MCP (octagonal colosseum, stone floor, 8 walls, 8 corner pillars, 920 tris).
+- [x] **Task 3.2**: Export arena as `.glb` to `res://assets/models/arena.glb` (glTF 2.0 binary, +Y Up, materials preserved).
+- [x] **Task 3.3**: Create `Arena.tscn` in Godot with static collisions (Layer 1 floor & 8 perimeter wall boxes), directional light, environment, and entity spawns.
+- [x] **Verification Gate**: Viewport screenshot in Blender + headless scene check in Godot passed + manual ratio test confirmed.
 
 ---
 
-## Milestone 4: Opponent Dummy & Combat Loop [PENDING]
-- [ ] **Task 4.1**: Create `EnemyDummy.tscn` with `Hurtbox3D` and `HealthComponent`.
-- [ ] **Task 4.2**: Verify hit detection, knockback, and health reduction when attacked.
-- [ ] **Task 4.3**: Add basic Floating Damage Text or Health UI bar.
-- [ ] **Verification Gate**: Headless check + manual combat playtest.
+## Milestone 4: Low-Poly Character, Combat Animations & Camera Overhaul [IN PROGRESS]
+- [x] **Task 4.1**: Model low-poly Roman gladiator in Blender (420 vertices, flat-shaded, sword in right hand, shield on left forearm).
+- [x] **Task 4.2**: Humanoid Armature rigging & accurate bone weights assignment (18 bones, zero unintended vertex deformation).
+- [x] **Task 4.3**: Integrate `player_character.glb` with `Player.tscn` and `PlayerController.gd`.
+- [x] **Phase 1: FPS Camera Overhaul & 360° Zero-Drift Verification**:
+  - Centered CameraPivot at `(0, 1.62, 0)` collinear with spine.
+  - Eliminated 22 cm eccentric orbit drift across 360° yaw (measured horizontal drift: `0.0000 m`).
+  - FPS near clipping (`near = 0.08`), head/neck scaled down to `0.0001` in FPS and restored in TPS.
+  - Synchronized melee attack aim with camera pitch and yaw in FPS.
+- [x] **Phase 2: Attack Animation & Damage Timing Synchronization**:
+  - Redesigned 3-phase melee attack in Blender (Wind-Up -> Slash Apex -> Recovery, 18 frames / 0.75s).
+  - Standardized XYZ bone rotation mode and keyframed articulated wrist `hand.R` and shoulder/core mechanics.
+  - Synchronized damage at swing apex ($t = 0.35\text{s}$) with single-hit guarantee (`_damage_applied_this_swing`).
+  - Verified no premature damage during wind-up, out-of-range miss, and directional check against TrainingDummy.
+  - Verified visual slash cue and dummy hit reactions in both FPS and TPS modes.
+- [x] **Phase 3: Shield Block Animation & Directional Defense Logic**:
+  - Keyframed dedicated shield defense animations in Blender: `block_start` (0.208s), `block_hold` (0.417s loopable), `block_release` (0.208s), and unified `block`.
+  - Exported and imported into `player_character.glb` with clean XYZ bone rotation and baked tracks.
+  - Implemented RMB input state machine: Press -> `block_start`, Hold -> `block_hold` (looping without restart every frame), Release -> `block_release` -> `idle`.
+  - Enforced mutual exclusion preventing simultaneous Attack and Block states.
+  - Implemented 120° directional defense cone vector calculation in `PlayerCombat.gd`.
+  - Configured `block_damage_reduction = 0.85` (85% damage mitigation on frontal block).
+  - Executed automated 10-test validation suite (`run_phase3_runtime_test.gd`) with 10/10 tests passing on GPU runtime.
+- [x] **Phase 4: Combat FSM Matrix (IDLE, RUN, ATTACK, BLOCK, DEAD)** [COMPLETED]:
+  - Modeled and keyframed non-looping `dead` action in Blender (monotonic collapse to ground, physically grounded, limbs resting at $Z \ge 0.0$m).
+  - Implemented centralized `enum CombatState { IDLE, RUN, ATTACK, BLOCK, DEAD }` with transitions, guards, and mutually exclusive property getters in `PlayerController.gd`.
+  - Integrated `HealthComponent` into `Player.tscn` with terminal death prioritization when $\text{HP} \le 0$.
+  - Enforced death lock: zero horizontal velocity, input lockout (movement, attack, block disabled), cancellation of active attacks/blocks, terminal dead state without idle reset.
+  - Implemented 18 automated tests in `run_phase4_fsm_runtime_test.gd` with 18/18 passing on GPU runtime.
+  - Verified zero regressions on Phase 1, Phase 2, and Phase 3 suites.
+- [x] **Bug Fix: RMB Block Stuck / Character Freezes**:
+  - Eliminated duplicate RMB handling across `InputEventMouseButton` and `block` action.
+  - Established single source of truth via InputMap `block` and `attack`.
+  - Verified and secured `_block_transition` lifecycle: `start` -> `holding` -> `releasing` -> `""`.
+  - Created runtime test `run_rmb_lifecycle_test.gd` verifying RMB press/hold/release, 45% speed, locomotion recovery, and re-entry (11/11 tests PASS).
+  - Executed full Phase 1-4 regression suite with 0 regressions.
+- [ ] **Phase 5: Gameplay Polish & Visual Verification Gate** [IN PROGRESS]:
+  - [x] **Task 5.1: Stylized Sword Slash Arc Ribbon VFX**:
+    - Created procedural `SlashArcVFX.gd` generating a dynamic $120^\circ$ crescent ribbon mesh (radius $1.05\,\text{m}$, width $0.14\,\text{m}$, 48 tris).
+    - Unshaded, two-sided, vertex-colored alpha material with bright white cutting edge and golden trail.
+    - Synchronized with exact `forward_dir` and player origin derived during attack apex impact ($t=0.35\,\text{s}$).
+    - Rapid expansion scale tween ($0.06\,\text{s}$), dynamic cut sweep rotation, smooth transparency fade ($0.15\,\text{s}$ total).
+    - Stale tween cleanup and persistent node instance to prevent leak/accumulation.
+    - Verified with 10-test suite `run_task5_1_slash_arc_test.gd` (10/10 PASS) and 0 regressions across Phase 1–4 suites.
+  - [x] **Task 5.2: Stylized Hit Impact Spark VFX**:
+    - Identified exact damage confirmation point in `PlayerCombat.gd` (`_perform_attack()` right after damage dispatch and `hit_landed.emit()`).
+    - Created reusable procedural `HitImpactVFX.gd` and scene `HitImpactVFX.tscn`:
+      - 4-pointed diamond star core flash (8 tris, white core to golden tip) with rapid pop (0.05s) and fade (0.08s).
+      - 7 radial low-poly diamond spark shards (14 tris, total 22 tris) with radial burst (0.12s) and alpha fade (0.10s).
+      - Unshaded, two-sided, vertex-colored alpha blending matching the warm-golden low-poly aesthetic.
+      - Lightweight and zero-texture (procedural `ImmediateMesh`), zero child node accumulation.
+    - Instantiated under `PlayerCombat` and safely triggered at exact target contact boundary (`target_pos - hit_dir * min(0.35, dist * 0.5)`).
+    - Zero VFX triggered on miss or out-of-range swings.
+    - Validated in both FPS and TPS camera modes.
+    - Tested with 10-test suite `run_task5_2_hit_impact_test.gd` (10/10 PASS).
+    - Zero regressions across Phase 1, Phase 2, Phase 3, Phase 4, RMB lifecycle, and Task 5.1 test suites.
+  - [x] **Task 5.3: Stylized Block Impact Shield Deflection VFX**:
+    - Identified exact confirmed-block path in `PlayerCombat.gd` (`_perform_attack()` where `is_blocked == true` and damage is mitigated by 85%).
+    - Created reusable procedural `BlockImpactVFX.gd` and scene `BlockImpactVFX.tscn`:
+      - 6-pointed hexagonal barrier star flash (12 tris, crisp white-cyan core to electric cyan rim) with rapid pop (0.04s) and fade (0.07s).
+      - 6 low-poly deflection spark shards (12 tris, total 24 tris) that burst backward toward incoming attacker along `-incoming_direction` (0.11s) and fade (0.08s). Total duration: 0.14s.
+      - Visually distinct from warm-gold `HitImpactVFX` by utilizing cyan/steel-blue energetic barrier aesthetic matching `TrainingDummy.block_flash_color`.
+      - Single instance reuse with zero node accumulation (clean tween reuse and finish hide).
+    - Hooked strictly into confirmed directional block:
+      - Frontal block: Block Impact VFX appears at shield/contact point, 85% reduced damage applied, no Hit Impact VFX.
+      - Rear attack: Full damage, no Block Impact VFX, Hit Impact VFX triggered on back.
+      - Flank attack (outside 120° cone): Full damage, no Block Impact VFX, Hit Impact VFX triggered.
+      - Unblocked attack: Full damage, no Block Impact VFX, normal Hit Impact VFX triggered.
+    - Supported both Player-as-attacker against blocking targets and Player-as-defender in `PlayerController.take_damage()`.
+    - Tested with 10-test suite `run_task5_3_block_impact_test.gd` (10/10 PASS).
+    - Zero regressions across Task 5.1, Task 5.2, RMB lifecycle, and Phases 1–4 suites.
+  - [x] **Task 5.4: Shield Durability Resource & Combat Integration**:
+    - Implemented separate Shield Durability resource (`shield_max_durability = 100.0`, `shield_durability = 100.0`).
+    - Added `normal_attack_shield_damage = 15.0` to `PlayerCombat.gd`, extensible for future attack tiers.
+    - Added reusable shield durability API with `apply_shield_damage(amount: float)` (clamping at 0.0 without going negative) and `reset_shield_durability()` in both `PlayerController.gd` and `TrainingDummy.gd`.
+    - Emits signal `shield_durability_changed(current: float, maximum: float)`.
+    - Integrated with confirmed directional block:
+      - Blocked attack: defender HP takes exactly 3.75 damage (85% reduction), shield durability loses exactly 15.0. Shield damage is completely independent of HP damage calculation.
+      - Repeated blocks cleanly step: 100 -> 85 -> 70 -> 55 -> 40 -> 25 -> 10 -> 0.
+      - Durability clamps strictly at 0.0. Shield Break is NOT implemented yet (reserved for Task 5.5); blocking is not disabled at 0 durability and no stun/stagger is added.
+      - Unblocked / Rear / Flank attacks: full HP damage (25.0), shield durability does NOT decrease.
+      - Existing visual FX (Block Impact VFX on block, Hit Impact VFX on unblocked) remain 100% functional.
+    - Verified in both FPS and TPS camera modes.
+    - Tested with 15-test suite `run_task5_4_shield_durability_test.gd` (15/15 PASS).
+    - Zero regressions across Task 5.1, Task 5.2, Task 5.3, RMB lifecycle, and Phases 1–4 suites.
+  - [x] **Combat Testing Tool Upgrade: Resettable Training Dummy & Attack Training Dummy**:
+    - **Part 1 (Resettable Training Dummy)**:
+      - Added `@export var auto_reset_on_death: bool = true` and `@export var reset_delay: float = 1.0` to `TrainingDummy.gd`.
+      - On death, schedules non-duplicating reset timer that restores full HP, clears dead state, updates health bar, resets shield durability, and restores material color without altering position.
+      - Added public API `reset_dummy()` for instant test resets.
+      - Added `reset_health()` to `HealthComponent.gd`.
+    - **Part 2 (Attack Training Dummy)**:
+      - Created `scripts/AttackTrainingDummy.gd` and `scenes/AttackTrainingDummy.tscn`.
+      - Stands completely still (strictly static position, zero chase/movement drift).
+      - Has zero health bar, zero health components, zero UI.
+      - Periodically executes basic melee attack cycle: 1.0s spawn delay -> Wait (2.0s) -> Wind-up (0.35s) -> Impact (25.0 damage in 2.2m frontal cone) -> Recovery (0.75s).
+      - Debug key controls: F6 (force attack now), F7 (toggle auto attack).
+      - Created dedicated test arena: `scenes/CombatTestArena.tscn` (Player + Side Training Dummy + Frontal Attack Dummy).
+      - Tested with 17-test suite `run_training_dummy_test.gd` (17/17 PASS).
+      - Zero regressions across Task 5.1, Task 5.2, Task 5.3, Task 5.4, RMB lifecycle, and Phases 1–4 suites.
+  - [x] **Task 5.5: Shield Break, Stagger Stun & Recovery System**:
+    - Dedicated Shield State machine in `PlayerController.gd`: `enum ShieldState { READY, BROKEN }`.
+    - Integrated Shield Break trigger when shield durability transitions $> 0 \to 0$ upon a confirmed block:
+      - Final incoming attack reducing durability to 0 resolves normally as a successful block (3.75 HP damage, Block Impact VFX triggers).
+      - Immediately enters `SHIELD_BROKEN` state.
+      - Emits `shield_broken()`.
+      - Forces player out of `CombatState.BLOCK` to `CombatState.IDLE`.
+      - Applies stagger stun (`shield_break_stun_duration: float = 1.0`): halts horizontal movement and locks jump/block.
+      - During broken and recovery state: RMB/block requests strictly rejected, shield durability stays 0.0, incoming attacks deal full damage (25.0) with zero Block Impact VFX.
+      - After `shield_recovery_delay: float = 2.0`, shield automatically restores to `shield_max_durability` (100.0), broken state clears, and `shield_restored()` is emitted.
+      - Player can block normally again after recovery.
+    - Created procedural `ShieldBreakVFX.gd` and scene `ShieldBreakVFX.tscn`:
+      - 8-pointed star burst flash (16 tris, pure white core).
+      - Expanding fractured shockwave ring (32 tris, electric blue/violet).
+      - 12 3D crystalline shield shards (24 tris) violently erupting outward and spinning with radial dispersion.
+      - Total duration ~0.32s; unshaded, vertex-colored alpha blending; single instance reuse with zero node accumulation.
+    - Updated `TrainingDummy.gd` with matching broken state, break detection, and recovery.
+    - Created acceptance test suite `run_task5_5_shield_break_test.gd` covering all 18 acceptance tests (18/18 PASS).
+    - Updated `run_task5_4_shield_durability_test.gd` Test 14 to reflect the new Task 5.5 contract (15/15 PASS).
+    - Zero regressions across Task 5.4 (15/15), Task 5.3 (10/10), Task 5.2 (10/10), Task 5.1 (10/10), RMB lifecycle (15/15), Phase 4 FSM (18/18), Phase 3 (10/10), Phase 2, Phase 1, and Training Dummy tests.
+  - [x] **Task 5.6A: Combat Test Arena UX, Shield Feedback & Player Respawn**:
+    - **Part A (One-Hit Death Diagnosis)**:
+      - Traced damage pipeline: `AttackTrainingDummy` -> `impact_time (0.35s)` -> `_apply_damage()` -> `PlayerController.take_damage()` -> `HealthComponent.take_damage()`.
+      - Measured Player max HP: `100.0`.
+      - Measured Dummy damage: `25.0` per swing.
+      - Confirmed single application per swing (no duplicate damage calls).
+      - Identified root cause of perceived "one-hit death": Absence of in-game Player HP/Shield HUD, lack of unblocked hit feedback VFX on player, and absence of clear Shield Break banner led to silent accumulation of damage until sudden death.
+    - **Part B (Combat Test Arena Respawn System)**:
+      - Added test-arena-only respawn system in `CombatTestArena.gd` (`scenes/CombatTestArena.tscn`).
+      - On player death, preserves death animation, waits ~1.5 seconds, then cleanly revives the exact same player instance via `PlayerController.respawn()`.
+      - Restores HP to 100, shield to 100, clears stun/block/attack, resets velocity, resets FSM to IDLE, and moves player back to original spawn transform. Zero node duplication.
+    - **Part C & D (Combat Test Arena HUD & Shield Break Banner)**:
+      - Created lightweight `CombatTestHUD.gd` and `scenes/CombatTestHUD.tscn`.
+      - Displays Player HP bar (green), Shield Durability bar (cyan), and Shield status label (`READY` in cyan, `BROKEN` in red with live recovery countdown `Recovering... X.Xs`).
+      - Centered high-contrast `SHIELD BROKEN` alert banner pulsing on the exact transition from $>0 \to 0$ durability, auto-fading after ~1.2s without repeat spam.
+      - Connected `PlayerController.take_damage()` to `PlayerCombat.trigger_hit_impact()` so incoming damage produces visual hit sparks on player.
+    - **Part E (Attack Training Dummy Verification)**:
+      - Verified stationary position, ~2.0s auto-attack interval, F6 manual trigger, F7 auto toggle, and single-hit impact timing.
+    - **Part F & Regression**:
+      - Created 24-test acceptance test suite `run_task5_6_combat_test_arena_test.gd` (24/24 PASS).
+      - Ran full 12-suite regression: Task 5.6A (24/24), Task 5.5 (18/18), Task 5.4 (15/15), Task 5.3 (10/10), Task 5.2 (10/10), Task 5.1 (10/10), RMB lifecycle (15/15), Phase 4 FSM (18/18), Phase 3 (10/10), Phase 2 (5/5), Phase 1 (4/4), Training Dummy (17/17) - ALL PASSED.
+      - Confirmed zero Git commits or pushes executed.
+

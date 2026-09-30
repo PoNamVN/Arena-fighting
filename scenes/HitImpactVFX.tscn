@@ -1,0 +1,7 @@
+[gd_scene load_steps=2 format=3 uid="uid://b2k3w8d1j4q5m"]
+
+[ext_resource type="Script" path="res://scripts/HitImpactVFX.gd" id="1_script"]
+
+[node name="HitImpactVFX" type="Node3D"]
+visible = false
+script = ExtResource("1_script")

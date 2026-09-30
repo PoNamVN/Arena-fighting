@@ -1,0 +1,173 @@
+[gd_scene load_steps=6 format=3 uid="uid://b1m8x7y4p3q2r"]
+
+[ext_resource type="Script" path="res://scripts/CombatTestHUD.gd" id="1_script"]
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_panel"]
+bg_color = Color(0.08, 0.1, 0.14, 0.85)
+corner_radius_top_left = 6
+corner_radius_top_right = 6
+corner_radius_bottom_right = 6
+corner_radius_bottom_left = 6
+content_margin_left = 12.0
+content_margin_top = 10.0
+content_margin_right = 12.0
+content_margin_bottom = 10.0
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_hp_fill"]
+bg_color = Color(0.2, 0.85, 0.35, 1)
+corner_radius_top_left = 3
+corner_radius_top_right = 3
+corner_radius_bottom_right = 3
+corner_radius_bottom_left = 3
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_shield_fill"]
+bg_color = Color(0.25, 0.7, 1.0, 1)
+corner_radius_top_left = 3
+corner_radius_top_right = 3
+corner_radius_bottom_right = 3
+corner_radius_bottom_left = 3
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_bar_bg"]
+bg_color = Color(0.15, 0.18, 0.22, 0.8)
+corner_radius_top_left = 3
+corner_radius_top_right = 3
+corner_radius_bottom_right = 3
+corner_radius_bottom_left = 3
+
+[node name="CombatTestHUD" type="CanvasLayer"]
+script = ExtResource("1_script")
+
+[node name="RootControl" type="Control" parent="."]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+
+[node name="StatsPanel" type="PanelContainer" parent="RootControl"]
+layout_mode = 0
+offset_left = 20.0
+offset_top = 20.0
+offset_right = 260.0
+offset_bottom = 175.0
+theme_override_styles/panel = SubResource("StyleBoxFlat_panel")
+
+[node name="VBoxContainer" type="VBoxContainer" parent="RootControl/StatsPanel"]
+layout_mode = 2
+theme_override_constants/separation = 6
+
+[node name="HeaderLabel" type="Label" parent="RootControl/StatsPanel/VBoxContainer"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.7, 0.8, 0.9, 1)
+theme_override_font_sizes/font_size = 12
+text = "COMBAT TEST ARENA"
+
+[node name="HPContainer" type="VBoxContainer" parent="RootControl/StatsPanel/VBoxContainer"]
+layout_mode = 2
+theme_override_constants/separation = 2
+
+[node name="HPLabel" type="Label" parent="RootControl/StatsPanel/VBoxContainer/HPContainer"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.3, 1, 0.45, 1)
+theme_override_font_sizes/font_size = 13
+text = "HP: 100 / 100"
+
+[node name="HPProgressBar" type="ProgressBar" parent="RootControl/StatsPanel/VBoxContainer/HPContainer"]
+custom_minimum_size = Vector2(0, 10)
+layout_mode = 2
+theme_override_styles/background = SubResource("StyleBoxFlat_bar_bg")
+theme_override_styles/fill = SubResource("StyleBoxFlat_hp_fill")
+value = 100.0
+show_percentage = false
+
+[node name="ShieldContainer" type="VBoxContainer" parent="RootControl/StatsPanel/VBoxContainer"]
+layout_mode = 2
+theme_override_constants/separation = 2
+
+[node name="ShieldLabel" type="Label" parent="RootControl/StatsPanel/VBoxContainer/ShieldContainer"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.4, 0.8, 1, 1)
+theme_override_font_sizes/font_size = 13
+text = "SHIELD: 100 / 100"
+
+[node name="ShieldProgressBar" type="ProgressBar" parent="RootControl/StatsPanel/VBoxContainer/ShieldContainer"]
+custom_minimum_size = Vector2(0, 10)
+layout_mode = 2
+theme_override_styles/background = SubResource("StyleBoxFlat_bar_bg")
+theme_override_styles/fill = SubResource("StyleBoxFlat_shield_fill")
+value = 100.0
+show_percentage = false
+
+[node name="StatusContainer" type="VBoxContainer" parent="RootControl/StatsPanel/VBoxContainer"]
+layout_mode = 2
+
+[node name="StatusLabel" type="Label" parent="RootControl/StatsPanel/VBoxContainer/StatusContainer"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.3, 0.9, 1, 1)
+theme_override_font_sizes/font_size = 13
+text = "READY"
+
+[node name="ControlsTip" type="Label" parent="RootControl"]
+layout_mode = 1
+anchors_preset = 2
+anchor_top = 1.0
+anchor_bottom = 1.0
+offset_left = 20.0
+offset_top = -65.0
+offset_right = 650.0
+offset_bottom = -15.0
+grow_vertical = 0
+theme_override_colors/font_color = Color(0.7, 0.75, 0.85, 0.85)
+theme_override_font_sizes/font_size = 12
+text = "[LMB] Attack  |  [RMB] Hold Block  |  [V] Perspective  |  [Shift] Sprint
+[F6] Dummy Attack Now  |  [F7] Toggle Dummy Auto-Attack"
+
+[node name="BreakBanner" type="Label" parent="RootControl"]
+visible = false
+layout_mode = 1
+anchors_preset = 8
+anchor_left = 0.5
+anchor_top = 0.5
+anchor_right = 0.5
+anchor_bottom = 0.5
+offset_left = -250.0
+offset_top = -140.0
+offset_right = 250.0
+offset_bottom = -80.0
+grow_horizontal = 2
+grow_vertical = 2
+pivot_offset = Vector2(250, 30)
+theme_override_colors/font_color = Color(1, 0.35, 0.15, 1)
+theme_override_colors/font_shadow_color = Color(0, 0, 0, 0.9)
+theme_override_constants/shadow_offset_x = 2
+theme_override_constants/shadow_offset_y = 2
+theme_override_font_sizes/font_size = 38
+text = "SHIELD BROKEN"
+horizontal_alignment = 1
+vertical_alignment = 1
+
+[node name="RespawnBanner" type="Label" parent="RootControl"]
+visible = false
+layout_mode = 1
+anchors_preset = 8
+anchor_left = 0.5
+anchor_top = 0.5
+anchor_right = 0.5
+anchor_bottom = 0.5
+offset_left = -250.0
+offset_top = -40.0
+offset_right = 250.0
+offset_bottom = 40.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_override_colors/font_color = Color(1, 0.85, 0.25, 1)
+theme_override_colors/font_shadow_color = Color(0, 0, 0, 0.9)
+theme_override_constants/shadow_offset_x = 2
+theme_override_constants/shadow_offset_y = 2
+theme_override_font_sizes/font_size = 22
+text = "PLAYER DEFEATED
+Respawning in 1.5s..."
+horizontal_alignment = 1
+vertical_alignment = 1

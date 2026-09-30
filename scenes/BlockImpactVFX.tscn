@@ -1,0 +1,7 @@
+[gd_scene load_steps=2 format=3 uid="uid://c3m7x9e2k5r8v"]
+
+[ext_resource type="Script" path="res://scripts/BlockImpactVFX.gd" id="1_script"]
+
+[node name="BlockImpactVFX" type="Node3D"]
+visible = false
+script = ExtResource("1_script")

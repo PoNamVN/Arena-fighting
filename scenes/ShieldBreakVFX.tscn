@@ -1,0 +1,7 @@
+[gd_scene load_steps=2 format=3 uid="uid://d1m8x7y3p4q9r"]
+
+[ext_resource type="Script" path="res://scripts/ShieldBreakVFX.gd" id="1_script"]
+
+[node name="ShieldBreakVFX" type="Node3D"]
+visible = false
+script = ExtResource("1_script")

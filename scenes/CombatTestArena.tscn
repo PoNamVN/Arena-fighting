@@ -1,0 +1,22 @@
+[gd_scene load_steps=7 format=3 uid="uid://c8m5k2p9x7w1r"]
+
+[ext_resource type="PackedScene" uid="uid://cx40kpm6r5d9e" path="res://scenes/Arena.tscn" id="1_arena"]
+[ext_resource type="Script" path="res://scripts/CombatTestArena.gd" id="2_controller"]
+[ext_resource type="PackedScene" uid="uid://bv8m4w1r2k7x9" path="res://scenes/AttackTrainingDummy.tscn" id="3_attack_dummy"]
+[ext_resource type="PackedScene" uid="uid://c5q0q5i3r8d1x" path="res://scenes/Player.tscn" id="4_player"]
+[ext_resource type="PackedScene" uid="uid://dm8y2x7v4k1w0" path="res://scenes/TrainingDummy.tscn" id="5_dummy"]
+[ext_resource type="PackedScene" uid="uid://b1m8x7y4p3q2r" path="res://scenes/CombatTestHUD.tscn" id="6_hud"]
+
+[node name="CombatTestArena" instance=ExtResource("1_arena")]
+script = ExtResource("2_controller")
+
+[node name="Player" parent="." index="5"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.1, 0)
+
+[node name="TrainingDummy" parent="." index="6"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 3.5, 0, 0)
+
+[node name="AttackTrainingDummy" parent="." index="7" instance=ExtResource("3_attack_dummy")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, -1.8)
+
+[node name="CombatTestHUD" parent="." index="8" instance=ExtResource("6_hud")]

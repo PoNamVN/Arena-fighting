@@ -1,21 +1,18 @@
-[gd_scene load_steps=8 format=3 uid="uid://c5q0q5i3r8d1x"]
+[gd_scene load_steps=9 format=3 uid="uid://c5q0q5i3r8d1x"]
 
 [ext_resource type="Script" path="res://scripts/PlayerController.gd" id="1_controller"]
 [ext_resource type="Script" path="res://scripts/PlayerCombat.gd" id="2_combat"]
+[ext_resource type="PackedScene" uid="uid://cjdsemtu0ldhu" path="res://assets/models/player_character.glb" id="3_character"]
+[ext_resource type="Script" path="res://scripts/HealthComponent.gd" id="4_health"]
+
+[ext_resource type="PackedScene" uid="uid://c3u0yq6w5a2k1" path="res://scenes/SlashArcVFX.tscn" id="5_slash_arc"]
+[ext_resource type="PackedScene" uid="uid://b2k3w8d1j4q5m" path="res://scenes/HitImpactVFX.tscn" id="6_hit_impact"]
+[ext_resource type="PackedScene" uid="uid://c3m7x9e2k5r8v" path="res://scenes/BlockImpactVFX.tscn" id="7_block_impact"]
+[ext_resource type="PackedScene" uid="uid://d1m8x7y3p4q9r" path="res://scenes/ShieldBreakVFX.tscn" id="8_shield_break"]
 
 [sub_resource type="CapsuleShape3D" id="CapsuleShape3D_body"]
 radius = 0.4
 height = 1.8
-
-[sub_resource type="CapsuleMesh" id="CapsuleMesh_body"]
-radius = 0.4
-height = 1.8
-
-[sub_resource type="BoxMesh" id="BoxMesh_visor"]
-size = Vector3(0.25, 0.15, 0.25)
-
-[sub_resource type="SphereShape3D" id="SphereShape3D_attack"]
-radius = 0.65
 
 [sub_resource type="StandardMaterial3D" id="StandardMaterial3D_slash"]
 shading_mode = 0
@@ -35,22 +32,18 @@ shape = SubResource("CapsuleShape3D_body")
 
 [node name="Visuals" type="Node3D" parent="."]
 
-[node name="BodyMesh" type="MeshInstance3D" parent="Visuals"]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.9, 0)
-mesh = SubResource("CapsuleMesh_body")
-
-[node name="FaceIndicator" type="MeshInstance3D" parent="Visuals"]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.4, -0.35)
-mesh = SubResource("BoxMesh_visor")
+[node name="CharacterModel" parent="Visuals" instance=ExtResource("3_character")]
 
 [node name="CameraPivot" type="Node3D" parent="."]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.5, 0)
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.62, 0)
 
 [node name="SpringArm3D" type="SpringArm3D" parent="CameraPivot"]
-spring_length = 4.0
-margin = 0.2
+transform = Transform3D(1, 0, 0, 0, 0.978148, 0.207912, 0, -0.207912, 0.978148, 0, 0, 0)
+spring_length = 3.5
+margin = 0.15
 
 [node name="Camera3D" type="Camera3D" parent="CameraPivot/SpringArm3D"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 3.5)
 current = true
 fov = 75.0
 
@@ -58,10 +51,29 @@ fov = 75.0
 script = ExtResource("2_combat")
 
 [node name="VisualSlashCue" type="Node3D" parent="PlayerCombat"]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.9, -1.1)
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0)
 visible = false
 
 [node name="SlashMesh" type="MeshInstance3D" parent="PlayerCombat/VisualSlashCue"]
 mesh = SubResource("BoxMesh_slash")
 
+[node name="SlashArcVFX" parent="PlayerCombat" instance=ExtResource("5_slash_arc")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0)
+visible = false
+
+[node name="HitImpactVFX" parent="PlayerCombat" instance=ExtResource("6_hit_impact")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0)
+visible = false
+
+[node name="BlockImpactVFX" parent="PlayerCombat" instance=ExtResource("7_block_impact")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0)
+visible = false
+
+[node name="ShieldBreakVFX" parent="PlayerCombat" instance=ExtResource("8_shield_break")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0)
+visible = false
+
+[node name="HealthComponent" type="Node" parent="."]
+script = ExtResource("4_health")
+max_health = 100.0
 

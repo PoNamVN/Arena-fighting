@@ -24,6 +24,16 @@ $RECYCLE.BIN/
 *.log
 *.dmp
 
+# Test generated screenshots
+phase*.png
+phase*.png.import
+runtime_screenshot.png
+runtime_screenshot.png.import
+
+# Blender autosave files
+*autosave.blend
+*autosave.blend.import
+
 # Environment / Secret tokens (if any)
 .env
 .env.*

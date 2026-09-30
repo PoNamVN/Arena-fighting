@@ -41,5 +41,11 @@ func is_dead() -> bool:
 	return _is_dead
 
 
+func reset_health() -> void:
+	current_health = max_health
+	_is_dead = false
+	health_changed.emit(current_health, max_health)
+
+
 func get_health_ratio() -> float:
 	return current_health / max_health if max_health > 0.0 else 0.0

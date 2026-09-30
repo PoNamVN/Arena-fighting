@@ -1,0 +1,7 @@
+[gd_scene load_steps=2 format=3 uid="uid://c3u0yq6w5a2k1"]
+
+[ext_resource type="Script" path="res://scripts/SlashArcVFX.gd" id="1_script"]
+
+[node name="SlashArcVFX" type="Node3D"]
+visible = false
+script = ExtResource("1_script")
