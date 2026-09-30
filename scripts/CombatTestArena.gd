@@ -23,6 +23,7 @@ func _ready() -> void:
 	if player:
 		_player_spawn_pos = player.global_position
 		_player_spawn_yaw = player._camera_yaw
+		player.shield_recovery_mode = PlayerController.ShieldRecoveryMode.TEST_ARENA
 		if player.health_component:
 			player.health_component.died.connect(_on_player_died)
 			

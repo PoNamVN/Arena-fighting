@@ -206,3 +206,185 @@
       - Created dedicated 22-test acceptance suite `run_task5_7_hit_reaction_test.gd` (22/22 PASS).
       - Full 13-suite regression: 168 / 168 tests passed (0 failures).
       - Strictly zero Git commits or pushes executed.
+  - [x] **Task 5.8: Combat Feedback & Target Feedback**:
+    - **Floating Damage Numbers**:
+      - Created `DamageNumberVFX.gd` and `scenes/DamageNumberVFX.tscn` using `Label3D` with `billboard = BILLBOARD_FIXED_Y` and `no_depth_test = true` for high visibility across FPS and TPS.
+      - Displays actual damage dealt at confirmed contact position: unblocked hit displays gold `25`, blocked hit displays light cyan `3.75`.
+      - Displays shield damage feedback as a distinct subtitle label `Shield -15` without changing or contaminating the HP damage calculation.
+      - Floats upward smoothly (~0.5m) and fades out over ~0.65s lifetime before recycling.
+    - **Instance Pooling & Memory Stability**:
+      - Created `DamageNumberPool.gd` and `scenes/DamageNumberPool.tscn` with 8 pre-allocated pooled instances under `PlayerCombat`.
+      - Recycles inactive instances and round-robin reuses oldest when saturated, strictly preventing permanent node accumulation or memory leaks.
+    - **Low-Shield Feedback**:
+      - Implemented `is_low_shield` detection and `low_shield_warning_changed` signal in `PlayerController.gd` at `<= 25%` threshold (`<= 25.0` durability).
+      - Added static warning label `LowShieldWarning` in `scenes/CombatTestHUD.tscn` without spawning duplicate nodes.
+      - Low-shield warning auto-clears on shield break (superseded by authoritative `SHIELD BROKEN` state) and upon shield restoration/respawn.
+    - **Combat Invariants Preserved**:
+      - Normal damage = 25.0, Block reduction = 85% (damage = 3.75), Shield damage = 15.0, Shield max = 100.0, Attack impact = 0.35s, Block cone = 120°, Dummy range = 2.2m.
+    - **Acceptance & Regression Testing**:
+      - Created dedicated 24-test acceptance suite `run_task5_8_combat_feedback_test.gd` (24/24 PASS).
+      - Full regression across all 14 previous suites: 168 / 168 PASS.
+      - Grand total: 192 / 192 PASS.
+  - [x] **Task 5.9: Attack Telegraph & Impact Readability**:
+    - **Attack Telegraph Component**:
+      - Created `scripts/AttackTelegraphVFX.gd` and `scenes/AttackTelegraphVFX.tscn` using a procedural low-poly sector fan mesh (60° arc, 2.2m radius) with an unshaded alpha-blended material, inner gradient fill, outer rim outline, and central directional arrow.
+      - Opacity ramps smoothly from 0.35 to 1.0 during wind-up (0.0s to 0.35s) and cleanly terminates at impact.
+      - Authoritative tracking: continuously follows `source_node` in `_process()`, strictly preventing telegraph from lagging behind a moving character.
+    - **Authoritative Attack Direction**:
+      - Reuses the combat system's authoritative attack direction (`dummy_fwd` for `AttackTrainingDummy`, camera forward projected onto XZ for player).
+      - Fully consistent in FPS and TPS modes without secondary or duplicate directional calculations.
+    - **Integration with AttackTrainingDummy**:
+      - Telegraph starts at the exact start of `_execute_attack_sequence()`.
+      - Automatically extinguished at `_apply_attack_impact()` (0.35s) and `_finish_attack_sequence()`.
+      - Extinguished immediately if attack is cancelled via `cancel_attack()`, misses, or target is out of range.
+      - AttackTrainingDummy remains strictly stationary.
+    - **Integration with Player**:
+      - Wired into `PlayerCombat.gd` (`trigger_attack_telegraph`) and triggered in `PlayerController.gd` during the wind-up phase of `CombatState.ATTACK`.
+      - Automatically cancelled if player dies, resets, or completes attack.
+    - **Node Stability & Zero Accumulation**:
+      - Bounded architecture: exactly one reusable telegraph instance per attacker (child of `AttackTrainingDummy` and `PlayerCombat`).
+      - Repeated attacks do not create new nodes or leak memory.
+    - **Combat Invariants Preserved**:
+      - Normal damage = 25.0, Block reduction = 85% (damage = 3.75), Shield damage = 15.0, Shield max = 100.0, Attack impact = 0.35s, Block cone = 120°, Dummy range = 2.2m.
+      - Zero early damage before 0.35s; zero duplicate damage; all existing VFX (Slash Arc, Hit Impact, Block Impact, Damage Numbers) intact.
+    - **Acceptance & Regression Testing**:
+      - Created dedicated 24-test acceptance suite `run_task5_9_attack_telegraph_test.gd` (24/24 PASS).
+      - Full regression across all 15 previous test suites: 192 / 192 PASS.
+      - Grand total: 216 / 216 PASS (233 / 233 individual assertions passed across all 16 suites).
+  - [x] **Task 5.10: Shield Lifecycle (Test Arena vs Real Match)**:
+    - **Shield Recovery Mode Policy / Context**:
+      - Defined explicit `ShieldRecoveryMode` enum (`TEST_ARENA`, `MATCH`) and exported `shield_recovery_mode` on `PlayerController.gd`.
+      - `CombatTestArena.gd` explicitly configures `player.shield_recovery_mode = PlayerController.ShieldRecoveryMode.TEST_ARENA` in `_ready()`.
+      - Future match configurations can cleanly set `ShieldRecoveryMode.MATCH` without hard-coding scene names or guessing context.
+    - **Context-Dependent Recovery Behavior**:
+      - **TEST_ARENA**: Retains existing prototype recovery where shield break causes 1.0s stun, followed by 2.0s recovery delay, restoring durability to 100 and state to `READY`.
+      - **MATCH**: Automatic recovery is strictly disabled. When shield durability reaches 0, shield transitions to `BROKEN` and permanently remains `BROKEN` for the rest of the life/round. RMB blocks are rejected, attacks deal full 25 damage without block impact VFX, and no timer restores durability until an explicit new-life/new-round reset.
+    - **Explicit Reset & Respawn Contract**:
+      - Created authoritative `reset_shield_for_new_round()` API on `PlayerController.gd`.
+      - Resets durability to 100, state to `READY`, clears stun and recovery timers, zeroes knockback impulses, updates/clears low-shield warnings, and emits `shield_restored`.
+      - `reset_shield_durability()` routes directly to `reset_shield_for_new_round()` for seamless backwards compatibility.
+      - `PlayerController.respawn()` leverages `reset_shield_for_new_round()` as the single source of truth for new-life reset without creating duplicate Player nodes.
+    - **Combat Invariants Preserved**:
+      - Normal damage = 25.0, Block reduction = 85% (damage = 3.75), Shield damage = 15.0, Shield max = 100.0, Attack impact = 0.35s, Block cone = 120°, Dummy range = 2.2m.
+      - Knockback (0.40m), block recoil (0.08m), shield break stun (1.0s), and all VFX intact.
+    - **Acceptance & Regression Testing**:
+      - Created dedicated 35-test acceptance suite `run_task5_10_shield_lifecycle_test.gd` (35/35 PASS).
+      - Full regression across all 16 previous test suites: 216 / 216 PASS.
+      - Grand total: 251 / 251 PASS (268 individual assertions passed across all 17 suites).
+      - Strictly zero Git commits or pushes executed.
+  - [x] **Task 5.11: Combat Feedback Polish (Hit/Miss, Block, Shield Break Presentation)**:
+    - **Hit Camera Feedback (Zero Drift)**:
+      - Additive, temporary pitch recoil on camera pivot (`_cam_recoil_pitch`).
+      - Normal Hit: subtle downward kick (-0.025 rad / ~1.4°), smooth tween return in 0.12s.
+      - Blocked Hit: smaller reaction (-0.012 rad / ~0.7°), smooth return in 0.08s.
+      - Shield Break: readable impact kick (-0.055 rad / ~3.1°), smooth return in 0.22s.
+      - Zero drift: resets to exactly 0.0 rad, strictly zero cumulative angular drift across repeated hits, blocks, and shield breaks.
+    - **Crosshair / Target Detection Feedback**:
+      - Added procedural screen-space centered crosshair (`scripts/Crosshair.gd`, `scenes/CombatFeedback.tscn`).
+      - Centered in both FPS and TPS (`is_centered()` returns true, anchored at center).
+      - Visual-only: does not modify aiming, attack direction, rotation, or auto-lock.
+      - Reuses combat detection logic (`PlayerCombat.get_valid_target_in_range()`) without duplicate geometry calculations.
+      - Dynamically highlights (red diamond pips + reticle pulse) when a valid target is in range and facing arc; returns to normal subtle state when no target is present.
+    - **Target Hit Flash & Feedback**:
+      - Triggers brief visual highlight on target (`is_flashing_hit`) ONLY after confirmed damage.
+      - Misses and out-of-range attacks produce zero target flash.
+      - Blocked attacks do NOT trigger normal hit flash (shield absorbs blow; BlockImpactVFX remains authoritative).
+      - Shield break triggers authoritative ShieldBreakVFX without material corruption.
+      - Zero permanent material changes, zero node leaks, zero duplicate instances.
+    - **Block & Shield Break Feedback**:
+      - Blocked attacks retain 3.75 HP damage, 15 shield damage, 120° block cone, and Block Impact VFX with subtle camera recoil.
+      - Shield Break retains 1.0s stun, stronger stagger, and ShieldBreakVFX, enhanced with subtle camera kick and temporary screen emphasis.
+    - **Miss Feedback**:
+      - Misses produce zero damage numbers, zero hit impact VFX, zero target knockback, and zero target hit reaction.
+    - **Lightweight Audio Hooks**:
+      - Implemented placeholder architecture: `audio_attack_started`, `audio_attack_hit`, `audio_attack_blocked`, `audio_shield_break`, and `audio_death`.
+      - Integrated silent `AudioStreamPlayer` nodes in `scenes/CombatFeedback.tscn` without downloading external files or creating low-quality placeholder noise.
+    - **FPS & TPS Compatibility**:
+      - Every feedback element verified in both First-Person and Third-Person modes.
+    - **Combat Invariants Preserved**:
+      - Normal damage = 25.0, Block reduction = 85% (damage = 3.75), Shield damage = 15.0, Shield max = 100.0, Attack impact = 0.35s, Block cone = 120°, Knockback = 0.40m, Block recoil = 0.08m, Dummy range = 2.2m.
+    - **Acceptance & Regression Testing**:
+      - Created dedicated 46-test acceptance suite `run_task5_11_combat_feedback_test.gd` (46/46 PASS).
+      - Full regression across all 18 test suites: 297 / 297 PASS.
+      - `git diff --check` strictly CLEAN.
+      - Strictly zero Git commits or pushes executed.
+  - [x] **Task 5.12: Centered TPS Combat Camera & Shift Sprint (Revision)**:
+    - **Centered Always-On TPS Combat Camera**:
+      - TPS camera is always in combat orientation: player stays visually centered on screen without over-the-shoulder offset (`h_offset = 0.0`, `v_offset = 0.0`).
+      - Core camera pivot strictly preserved at `(0, 1.62, 0)` collinear with spine, maintaining Phase 1 zero-drift architecture.
+      - Mouse look controls horizontal camera yaw and vertical pitch (`-75°` to `+60°`).
+      - Player horizontal yaw follows camera yaw (`visuals.rotation.y = _camera_yaw`).
+      - Camera pitch affects camera pivot only; player stays strictly upright (`visuals.rotation.x = 0.0`, `rotation.x = 0.0`, `rotation.z = 0.0`).
+    - **Camera-Relative Movement & Strafing**:
+      - WASD movement is camera-relative: W forward, S backward, A/D strafe.
+      - Player continuously faces forward along camera yaw while moving or standing.
+    - **Shift Sprint**:
+      - Shift key operates as Sprint only (no Combat Lock toggle).
+      - Reuses existing sprint system: holding Shift increases movement speed to `sprint_speed` (10.5); releasing restores `walk_speed` (6.0).
+    - **Combat Actions & VFX Compatibility**:
+      - Melee attacks, directional blocks, and VFX (Slash Arc, Hit Impact, Block Impact) align with camera forward.
+      - Attacks deal normal 25 damage; blocks retain 120° cone, 85% mitigation, and shield durability rules.
+    - **FPS Isolation & Lifecycle Safety**:
+      - FPS camera remains completely unchanged (`camera.position = (0, 0, 0)`, `near = 0.08`, `h_offset = 0.0`).
+      - Perspective toggling (`KEY_V`) transitions cleanly between FPS and centered TPS without camera drift.
+      - Death and respawn maintain centered camera.
+    - **Acceptance & Regression Testing**:
+      - Created dedicated acceptance suite `run_task5_12_shift_lock_test.gd` (40/40 PASS).
+      - Full regression across all 19 test suites: 352 / 352 PASS.
+      - `git diff --check` strictly CLEAN.
+      - Strictly zero Git commits or pushes executed.
+  - [x] **Task 5.13: Remove Crosshair**:
+    - **Crosshair Complete Removal**:
+      - Deleted `scripts/Crosshair.gd`.
+      - Removed `Crosshair` Control node and script reference from `scenes/CombatFeedback.tscn`.
+      - Removed crosshair property, update calls, and `is_crosshair_centered()` from `scripts/CombatFeedback.gd`.
+      - Removed crosshair-only assertions and tests from `run_task5_11_combat_feedback_test.gd` and `run_task5_12_shift_lock_test.gd`.
+      - Preserved all other feedback systems completely unchanged: camera recoil, hit flash, block feedback, shield-break feedback, damage numbers, attack telegraph, screen emphasis, audio signals, combat FSM, centered TPS camera, Shift sprint, and FPS/TPS behaviors.
+    - **Acceptance & Regression Testing**:
+      - Updated Task 5.11 acceptance test suite (`run_task5_11_combat_feedback_test.gd`): 44 / 44 PASS.
+      - Updated Task 5.12 acceptance test suite (`run_task5_12_shift_lock_test.gd`): 40 / 40 PASS.
+      - Full regression across all test suites: 352 / 352 PASS.
+      - `git diff --check` strictly CLEAN.
+      - Strictly zero Git commits or pushes executed.
+  - [x] **Task 5.14: 3-Hit Attack Combo System** [COMPLETED / ACCEPTED]:
+    - **Combo Chaining Sequence**:
+      - Implemented 3-hit attack combo (`_combo_step`: 0 -> 1 -> 2 -> 3) in `PlayerController.gd`.
+      - Each swing deals 25.0 damage (total 75.0 damage for complete 3-hit combo against training dummy).
+      - Reuses 18-frame melee attack animation with apex damage at $t = 0.35$s.
+      - Integrated with combat FSM: preserves `CombatState.ATTACK` across chain transitions without dropping to locomotion prematurely.
+    - **Combo Window & Transition Timing**:
+      - Defined combo window `COMBO_WINDOW_START = 0.35` and `COMBO_WINDOW_END = 0.70`.
+      - `is_in_combo_window()` evaluates active swing position.
+      - If no follow-up attack is triggered within `combo_recovery_timeout = 0.25s` after swing finishes, combo resets cleanly to step 0.
+    - **Defensive & Combat Invariants**:
+      - RMB block cancels combo on press; mid-swing blocking remains rejected during active strike.
+      - Directional block cone (120°), 85% mitigation (3.75 HP damage), shield durability (-15 per hit) work seamlessly across all combo steps.
+      - VFX (Telegraph fan, Slash Arc ribbon, Hit Impact sparks, Block Impact deflection, Damage Numbers) trigger reliably on each respective strike.
+      - Death, respawn, and shield break immediately reset active combo state.
+      - Both FPS and centered TPS modes support 3-hit combo identically.
+    - **Acceptance Testing**:
+      - Verified with `run_task5_14_attack_combo_test.gd`: 14 / 14 PASS.
+  - [x] **Task 5.14A: Combo Input Buffer** [COMPLETED / ACCEPTED]:
+    - **Early Input Buffering**:
+      - Implemented `_combo_buffer` and `_combo_queued` state tracking in `PlayerController.gd`.
+      - Mouse clicks occurring during attack wind-up ($t < 0.35$s) or recovery are safely queued into the input buffer.
+      - Queued inputs execute automatically at the completion of current attack animation (`_on_animation_finished`).
+    - **Input Spam Clamping**:
+      - Clicking rapidly/spamming LMB cannot exceed `MAX_COMBO_STEP = 3` attacks.
+      - Excess clicks beyond 3 are discarded safely without hanging or infinite loops.
+    - **Buffer Cleanup Safety**:
+      - Buffer is cleared immediately upon character death, hit reaction recoil, shield break, or block engagement.
+    - **Acceptance Testing**:
+      - Verified with `run_task5_14a_combo_buffer_test.gd`: 14 / 14 PASS.
+  - [x] **Task 5.14C: Combo Finisher Recovery Pause** [COMPLETED / ACCEPTED]:
+    - **Finisher Recovery Lockdown**:
+      - Defined `COMBO_FINISHER_RECOVERY = 0.8` seconds in `PlayerController.gd`.
+      - Upon completing the 3rd attack (Finisher), `_combo_finisher_recovery_timer` is set to 0.8s.
+      - During this 0.8s window, both LMB attack and RMB block requests are strictly rejected (`can_attack()` and `_start_block()` return false).
+    - **Anti-Bypass Hardening**:
+      - Finisher recovery pause timer cannot be bypassed or cleared by hit reaction or shield break (`reset_combo(false)` preserves finisher recovery timer).
+      - Death and respawn cleanly reset finisher pause.
+      - Once the 0.8s timer expires, normal locomotion and combat inputs (LMB attack, RMB block) resume seamlessly.
+      - 1-hit and 2-hit attacks do not trigger finisher recovery (normal 0.25s combo reset timeout applies).
+    - **Acceptance Testing**:
+      - Verified with `run_task5_14c_combo_finisher_recovery_test.gd`: 9 / 9 PASS.

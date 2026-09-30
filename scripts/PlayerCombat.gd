@@ -19,8 +19,11 @@ signal hit_landed(target: Node, damage: float, was_blocked: bool)
 @onready var hit_impact_vfx: Node3D = get_node_or_null("HitImpactVFX") as Node3D
 @onready var block_impact_vfx: Node3D = get_node_or_null("BlockImpactVFX") as Node3D
 @onready var shield_break_vfx: Node3D = get_node_or_null("ShieldBreakVFX") as Node3D
+@onready var damage_number_pool: DamageNumberPool = get_node_or_null("DamageNumberPool") as DamageNumberPool
+@onready var attack_telegraph_vfx: AttackTelegraphVFX = get_node_or_null("AttackTelegraphVFX") as AttackTelegraphVFX
 @onready var slash_effect: Node3D = slash_arc_vfx if slash_arc_vfx else visual_slash_cue
 @onready var player: PlayerController = get_parent() as PlayerController
+@onready var combat_feedback: CombatFeedback = player.get_node_or_null("CombatFeedback") as CombatFeedback if player else null
 
 ## VFX Configuration
 @export var use_legacy_slash_cue: bool = false
@@ -31,6 +34,22 @@ var _cooldown_timer: float = 0.0
 var _slash_tween: Tween
 var _cached_shape: SphereShape3D
 var _damage_applied_this_swing: bool = false
+
+var combo_step: int:
+	get:
+		return player.combo_step if player else 1
+
+var combo_buffer: int:
+	get:
+		return player.combo_buffer if player else 0
+
+
+func get_combo_step() -> int:
+	return player.get_combo_step() if player else 1
+
+
+func get_combo_buffer() -> int:
+	return player.get_combo_buffer() if player else 0
 
 
 func _ready() -> void:
@@ -44,6 +63,18 @@ func _ready() -> void:
 		block_impact_vfx.visible = false
 	if shield_break_vfx:
 		shield_break_vfx.visible = false
+	if not damage_number_pool:
+		damage_number_pool = get_node_or_null("DamageNumberPool") as DamageNumberPool
+		if not damage_number_pool:
+			damage_number_pool = DamageNumberPool.new()
+			damage_number_pool.name = "DamageNumberPool"
+			add_child(damage_number_pool)
+	if not attack_telegraph_vfx:
+		attack_telegraph_vfx = get_node_or_null("AttackTelegraphVFX") as AttackTelegraphVFX
+		if not attack_telegraph_vfx:
+			attack_telegraph_vfx = AttackTelegraphVFX.new()
+			attack_telegraph_vfx.name = "AttackTelegraphVFX"
+			add_child(attack_telegraph_vfx)
 	_cached_shape = SphereShape3D.new()
 	_cached_shape.radius = attack_radius
 
@@ -62,13 +93,23 @@ func start_attack() -> bool:
 		return false
 	_cooldown_timer = attack_cooldown
 	_damage_applied_this_swing = false
+	if combat_feedback:
+		combat_feedback.play_audio_event("attack_started")
 	return true
+
+
+func trigger_attack_telegraph(direction: Vector3, windup: float = 0.35) -> void:
+	if attack_telegraph_vfx:
+		var origin: Vector3 = player.global_position if player else global_position
+		attack_telegraph_vfx.trigger(origin, direction, windup, player)
 
 
 func execute_impact() -> bool:
 	if _damage_applied_this_swing:
 		return false # Guard: Each attack swing can deal damage only once
 	_damage_applied_this_swing = true
+	if attack_telegraph_vfx:
+		attack_telegraph_vfx.stop()
 	_perform_attack()
 	return true
 
@@ -218,12 +259,99 @@ func _perform_attack() -> void:
 
 		if is_blocked:
 			_trigger_block_impact(contact_pos, hit_dir)
+			spawn_damage_number(contact_pos, final_damage, true, normal_attack_shield_damage)
 			if target_broke_shield_now and not (target_node is PlayerController):
 				_trigger_shield_break(contact_pos, hit_dir)
+				if player and player.has_method("apply_camera_recoil"):
+					player.apply_camera_recoil(2)
+				if combat_feedback:
+					combat_feedback.trigger_shield_break_feedback(contact_pos)
+			else:
+				if player and player.has_method("apply_camera_recoil"):
+					player.apply_camera_recoil(1)
+				if combat_feedback:
+					combat_feedback.trigger_block_feedback(contact_pos)
 		else:
 			_trigger_hit_impact(contact_pos, hit_dir)
 			_trigger_hit_stop()
+			spawn_damage_number(contact_pos, final_damage, false, 0.0)
+			if player and player.has_method("apply_camera_recoil"):
+				player.apply_camera_recoil(0)
+			if combat_feedback:
+				combat_feedback.trigger_hit_feedback(target_node, final_damage)
 
+func get_valid_target_in_range() -> Node:
+	var world_3d: World3D = get_world_3d()
+	if not world_3d or not is_inside_tree():
+		return null
+
+	var space_state: PhysicsDirectSpaceState3D = world_3d.direct_space_state
+	if not space_state:
+		return null
+
+	var forward_dir: Vector3 = Vector3.FORWARD
+	var origin_pos: Vector3 = Vector3.ZERO
+	if player:
+		if player.is_third_person:
+			var attack_basis: Basis = player.visuals.global_basis if player.visuals else player.global_basis
+			forward_dir = -attack_basis.z.normalized()
+			origin_pos = player.global_position + Vector3(0.0, 0.9, 0.0)
+		else:
+			var attack_basis: Basis = player.camera.global_basis if player.camera else player.global_basis
+			forward_dir = -attack_basis.z.normalized()
+			origin_pos = (player.camera.global_position if player.camera else player.global_position) + Vector3(0.0, -0.2, 0.0)
+	else:
+		forward_dir = -global_basis.z.normalized()
+		origin_pos = global_position + Vector3(0.0, 0.9, 0.0)
+
+	var attack_center: Vector3 = origin_pos + forward_dir * (attack_range * 0.5)
+
+	var query: PhysicsShapeQueryParameters3D = PhysicsShapeQueryParameters3D.new()
+	query.shape = _cached_shape
+	query.transform = Transform3D(Basis.IDENTITY, attack_center)
+	query.collision_mask = target_collision_mask
+	query.collide_with_areas = false
+	query.collide_with_bodies = true
+
+	if player:
+		query.exclude = [player.get_rid()]
+
+	var hits: Array[Dictionary] = space_state.intersect_shape(query, 16)
+	if hits.is_empty():
+		return null
+
+	for hit in hits:
+		var collider: Object = hit.get("collider")
+		if not collider is Node:
+			continue
+
+		var target_node: Node = collider as Node
+		if target_node == player or target_node == self or target_node.is_ancestor_of(self) or self.is_ancestor_of(target_node):
+			continue
+
+		if not target_node.has_method("take_damage"):
+			continue
+
+		# Line-of-sight wall check
+		var target_pos: Vector3 = (target_node as Node3D).global_position + Vector3(0.0, 0.9, 0.0) if target_node is Node3D else origin_pos
+		var ray_query: PhysicsRayQueryParameters3D = PhysicsRayQueryParameters3D.create(
+			origin_pos, target_pos, wall_collision_mask
+		)
+		ray_query.collide_with_areas = false
+		ray_query.collide_with_bodies = true
+
+		var exclude_list: Array[RID] = []
+		if player:
+			exclude_list.append(player.get_rid())
+		if target_node is CollisionObject3D:
+			exclude_list.append((target_node as CollisionObject3D).get_rid())
+		ray_query.exclude = exclude_list
+
+		var ray_result: Dictionary = space_state.intersect_ray(ray_query)
+		if ray_result.is_empty():
+			return target_node
+
+	return null
 
 
 func is_attack_inside_block_cone(defender: Node3D, attacker_pos: Vector3, block_cone_deg: float = 120.0) -> bool:
@@ -355,6 +483,18 @@ func stop_slash_effect() -> void:
 		shield_break_vfx.stop()
 	elif shield_break_vfx:
 		shield_break_vfx.visible = false
+	if damage_number_pool and damage_number_pool.has_method("stop_all"):
+		damage_number_pool.stop_all()
+	if attack_telegraph_vfx and attack_telegraph_vfx.has_method("stop"):
+		attack_telegraph_vfx.stop()
+	elif attack_telegraph_vfx:
+		attack_telegraph_vfx.visible = false
+
+
+func spawn_damage_number(impact_pos: Vector3, hp_amount: float, is_blocked: bool, shield_amount: float = 0.0) -> DamageNumberVFX:
+	if damage_number_pool and damage_number_pool.has_method("spawn"):
+		return damage_number_pool.spawn(impact_pos, hp_amount, is_blocked, shield_amount)
+	return null
 
 
 func _trigger_hit_stop() -> void:

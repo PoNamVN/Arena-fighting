@@ -1,0 +1,9 @@
+[gd_scene load_steps=2 format=3 uid="uid://d1p8x4w2m7r9k"]
+
+[ext_resource type="Script" path="res://scripts/AttackTelegraphVFX.gd" id="1_telegraph"]
+
+[node name="AttackTelegraphVFX" type="Node3D"]
+visible = false
+script = ExtResource("1_telegraph")
+
+[node name="MeshInstance3D" type="MeshInstance3D" parent="."]

@@ -9,6 +9,9 @@
 [ext_resource type="PackedScene" uid="uid://b2k3w8d1j4q5m" path="res://scenes/HitImpactVFX.tscn" id="6_hit_impact"]
 [ext_resource type="PackedScene" uid="uid://c3m7x9e2k5r8v" path="res://scenes/BlockImpactVFX.tscn" id="7_block_impact"]
 [ext_resource type="PackedScene" uid="uid://d1m8x7y3p4q9r" path="res://scenes/ShieldBreakVFX.tscn" id="8_shield_break"]
+[ext_resource type="PackedScene" uid="uid://c6v2n9k8m1p4q" path="res://scenes/DamageNumberPool.tscn" id="9_damage_pool"]
+[ext_resource type="PackedScene" uid="uid://d1p8x4w2m7r9k" path="res://scenes/AttackTelegraphVFX.tscn" id="10_telegraph"]
+[ext_resource type="PackedScene" uid="uid://b7v9x2m4r1k5p" path="res://scenes/CombatFeedback.tscn" id="11_combat_feedback"]
 
 [sub_resource type="CapsuleShape3D" id="CapsuleShape3D_body"]
 radius = 0.4
@@ -73,7 +76,13 @@ visible = false
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0)
 visible = false
 
+[node name="DamageNumberPool" parent="PlayerCombat" instance=ExtResource("9_damage_pool")]
+
+[node name="AttackTelegraphVFX" parent="PlayerCombat" instance=ExtResource("10_telegraph")]
+
 [node name="HealthComponent" type="Node" parent="."]
 script = ExtResource("4_health")
 max_health = 100.0
+
+[node name="CombatFeedback" parent="." instance=ExtResource("11_combat_feedback")]
 

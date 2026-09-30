@@ -12,6 +12,7 @@ extends StaticBody3D
 
 ## Node References
 @onready var visuals: Node3D = get_node_or_null("Visuals") as Node3D
+@onready var attack_telegraph_vfx: AttackTelegraphVFX = get_node_or_null("AttackTelegraphVFX") as AttackTelegraphVFX
 var anim_player: AnimationPlayer = null
 
 ## Internal State
@@ -23,6 +24,13 @@ var _total_attacks_executed: int = 0
 
 func _ready() -> void:
 	_fixed_position = global_position
+
+	if not attack_telegraph_vfx:
+		attack_telegraph_vfx = get_node_or_null("AttackTelegraphVFX") as AttackTelegraphVFX
+		if not attack_telegraph_vfx:
+			attack_telegraph_vfx = AttackTelegraphVFX.new()
+			attack_telegraph_vfx.name = "AttackTelegraphVFX"
+			add_child(attack_telegraph_vfx)
 
 	# Find AnimationPlayer inside Visuals/CharacterModel
 	anim_player = find_child("AnimationPlayer", true, false) as AnimationPlayer
@@ -94,10 +102,22 @@ func toggle_auto_attack() -> bool:
 	auto_attack = !auto_attack
 	if auto_attack and not _is_attacking:
 		_start_wait_cycle(0.5)
-	elif not auto_attack and not _is_attacking:
-		if _cycle_tween and _cycle_tween.is_valid():
+	elif not auto_attack:
+		if _is_attacking:
+			cancel_attack()
+		elif _cycle_tween and _cycle_tween.is_valid():
 			_cycle_tween.kill()
 	return auto_attack
+
+
+func cancel_attack() -> void:
+	_is_attacking = false
+	if _cycle_tween and _cycle_tween.is_valid():
+		_cycle_tween.kill()
+	if attack_telegraph_vfx:
+		attack_telegraph_vfx.stop()
+	if anim_player and anim_player.has_animation("idle"):
+		anim_player.play("idle", 0.15)
 
 
 func _start_wait_cycle(delay: float) -> void:
@@ -115,6 +135,13 @@ func _start_wait_cycle(delay: float) -> void:
 func _execute_attack_sequence() -> void:
 	_is_attacking = true
 	_face_target()
+
+	var dummy_fwd: Vector3 = -visuals.global_basis.z if visuals else -global_basis.z
+	dummy_fwd.y = 0.0
+	dummy_fwd = dummy_fwd.normalized() if dummy_fwd.length_squared() > 0.0001 else Vector3.FORWARD
+
+	if attack_telegraph_vfx:
+		attack_telegraph_vfx.trigger(global_position, dummy_fwd, attack_windup, self)
 
 	if anim_player and anim_player.has_animation("attack"):
 		anim_player.speed_scale = 1.0
@@ -135,6 +162,9 @@ func _execute_attack_sequence() -> void:
 
 
 func _apply_attack_impact() -> void:
+	if attack_telegraph_vfx:
+		attack_telegraph_vfx.stop()
+
 	_total_attacks_executed += 1
 	if not target:
 		target = _find_player()
@@ -159,6 +189,9 @@ func _apply_attack_impact() -> void:
 
 
 func _finish_attack_sequence() -> void:
+	if attack_telegraph_vfx:
+		attack_telegraph_vfx.stop()
+
 	_is_attacking = false
 	if anim_player and anim_player.has_animation("idle"):
 		anim_player.play("idle", 0.15)

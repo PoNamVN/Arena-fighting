@@ -51,6 +51,13 @@ var _knockback_vel: Vector3 = Vector3.ZERO
 var _hit_reaction_tween: Tween = null
 var _hit_reaction_count: int = 0
 var _cam_recoil_pitch: float = 0.0
+var _cam_recoil_tween: Tween = null
+
+enum ShieldRecoveryMode {
+	TEST_ARENA,
+	MATCH
+}
+@export var shield_recovery_mode: ShieldRecoveryMode = ShieldRecoveryMode.TEST_ARENA
 
 enum ShieldState {
 	READY,
@@ -66,15 +73,22 @@ var is_shield_stunned: bool:
 
 var shield_recovery_time_remaining: float:
 	get:
+		if shield_recovery_mode == ShieldRecoveryMode.MATCH:
+			return 0.0
 		return maxf(0.0, _shield_recovery_timer)
 
 var _shield_stun_timer: float = 0.0
 var _shield_recovery_timer: float = 0.0
 var _shield_break_count: int = 0
 
+## Task 5.8: Combat Feedback & Low-Shield Feedback
+@export var low_shield_threshold: float = 25.0
+var is_low_shield: bool = false
+
 signal shield_durability_changed(current: float, maximum: float)
 signal shield_broken()
 signal shield_restored()
+signal low_shield_warning_changed(is_active: bool)
 signal hit_reacted(is_blocked: bool, hit_dir: Vector3)
 
 ## Node References
@@ -84,6 +98,7 @@ signal hit_reacted(is_blocked: bool, hit_dir: Vector3)
 @onready var camera: Camera3D = $CameraPivot/SpringArm3D/Camera3D
 @onready var combat: PlayerCombat = get_node_or_null("PlayerCombat") as PlayerCombat
 @onready var health_component: HealthComponent = get_node_or_null("HealthComponent") as HealthComponent
+@onready var combat_feedback: CombatFeedback = get_node_or_null("CombatFeedback") as CombatFeedback
 var anim_player: AnimationPlayer = null
 var _skeleton: Skeleton3D = null
 var _head_bone_idx: int = -1
@@ -91,12 +106,39 @@ var _neck_bone_idx: int = -1
 
 ## FSM & Combat State
 const ATTACK_IMPACT_TIMESTAMP: float = 0.35
+const COMBO_WINDOW_START: float = 0.35
+const COMBO_WINDOW_END: float = 0.70
+const MAX_COMBO_STEP: int = 3
+const COMBO_FINISHER_RECOVERY: float = 0.8
+@export var combo_recovery_timeout: float = 0.25
+
+signal combo_step_changed(current_step: int)
+
 var combat_state: CombatState = CombatState.IDLE
 var _camera_yaw: float = 0.0
+var _prev_camera_yaw: float = 0.0
 var _camera_pitch: float = 0.0
 var _is_mouse_captured: bool = true
 var _attack_impact_applied: bool = false
 var _block_transition: String = ""
+
+var combo_step: int:
+	get:
+		return _combo_step
+
+var combo_buffer: int:
+	get:
+		return _combo_buffer
+
+var _combo_step: int = 0
+var _combo_buffer: int = 0
+var _combo_queued: bool = false
+var _combo_recovery_timer: float = 0.0
+var _combo_finisher_recovery_timer: float = 0.0
+
+var combo_finisher_recovery_remaining: float:
+	get:
+		return maxf(0.0, _combo_finisher_recovery_timer)
 
 ## Compatibility Properties (Mutually exclusive by design)
 var is_attacking: bool:
@@ -152,7 +194,7 @@ func _unhandled_input(event: InputEvent) -> void:
 			_camera_pitch = clampf(_camera_pitch, deg_to_rad(min_pitch), deg_to_rad(max_pitch))
 			if camera_pivot:
 				camera_pivot.rotation.y = _camera_yaw
-				camera_pivot.rotation.x = _camera_pitch
+				camera_pivot.rotation.x = _camera_pitch + _cam_recoil_pitch
 		elif event is InputEventKey and event.is_pressed() and not event.is_echo() and event.physical_keycode == KEY_V:
 			toggle_camera_perspective()
 		return
@@ -170,7 +212,10 @@ func _unhandled_input(event: InputEvent) -> void:
 
 		if camera_pivot:
 			camera_pivot.rotation.y = _camera_yaw
-			camera_pivot.rotation.x = _camera_pitch
+			camera_pivot.rotation.x = _camera_pitch + _cam_recoil_pitch
+
+		if visuals:
+			visuals.rotation.y = _camera_yaw
 
 	# Mouse release / capture
 	if event.is_action_pressed("ui_cancel"):
@@ -211,10 +256,11 @@ func _physics_process(delta: float) -> void:
 	if shield_state == ShieldState.BROKEN:
 		if _shield_stun_timer > 0.0:
 			_shield_stun_timer -= delta
-		if _shield_recovery_timer > 0.0:
-			_shield_recovery_timer -= delta
-			if _shield_recovery_timer <= 0.0:
-				_restore_shield()
+		if shield_recovery_mode == ShieldRecoveryMode.TEST_ARENA:
+			if _shield_recovery_timer > 0.0:
+				_shield_recovery_timer -= delta
+				if _shield_recovery_timer <= 0.0:
+					_restore_shield()
 
 	# Apply Gravity
 	if not is_on_floor():
@@ -241,7 +287,7 @@ func _physics_process(delta: float) -> void:
 	# Determine Target Speed
 	var is_sprinting: bool = Input.is_action_pressed("sprint")
 	var target_speed: float = sprint_speed if is_sprinting else walk_speed
-	if combat_state == CombatState.ATTACK:
+	if combat_state == CombatState.ATTACK or _combo_finisher_recovery_timer > 0.0:
 		target_speed *= 0.5 # Phase 2: 50% attack movement speed
 	elif combat_state == CombatState.BLOCK:
 		target_speed *= 0.45 # Phase 3: 45% block movement speed
@@ -264,18 +310,14 @@ func _physics_process(delta: float) -> void:
 		velocity.x = new_horizontal.x
 		velocity.z = new_horizontal.z
 
-	# Rotate Character Visuals
+	# Rotate Character Visuals (player horizontal yaw follows camera yaw in combat camera)
 	if visuals:
-		if is_third_person:
-			if combat_state == CombatState.BLOCK:
-				# Face camera yaw while blocking to keep shield facing threat
-				visuals.rotation.y = lerp_angle(visuals.rotation.y, _camera_yaw, rotation_speed * delta)
-			elif combat_state != CombatState.ATTACK and move_dir.length_squared() > 0.001:
-				var target_angle: float = atan2(-move_dir.x, -move_dir.z)
-				visuals.rotation.y = lerp_angle(visuals.rotation.y, target_angle, rotation_speed * delta)
-		else:
-			# In 1st person: orient character with camera yaw for accurate forward aim
+		if not is_third_person:
 			visuals.rotation.y = _camera_yaw
+		else:
+			if move_dir.length_squared() > 0.001 or combat_state == CombatState.BLOCK or not is_equal_approx(_camera_yaw, _prev_camera_yaw):
+				visuals.rotation.y = _camera_yaw
+				_prev_camera_yaw = _camera_yaw
 
 	move_and_slide()
 
@@ -296,6 +338,18 @@ func _physics_process(delta: float) -> void:
 				_attack_impact_applied = true
 				if combat:
 					combat.execute_impact()
+
+	# Decay combo recovery timer when not attacking
+	if combat_state != CombatState.ATTACK and _combo_recovery_timer > 0.0:
+		_combo_recovery_timer = maxf(0.0, _combo_recovery_timer - delta)
+		if _combo_recovery_timer <= 0.0:
+			if _combo_step != 0:
+				_combo_step = 0
+				combo_step_changed.emit(0)
+
+	# Task 5.14C: Finisher recovery blocks new attacks and blocks without a new FSM state.
+	if _combo_finisher_recovery_timer > 0.0:
+		_combo_finisher_recovery_timer = maxf(0.0, _combo_finisher_recovery_timer - delta)
 
 	_update_locomotion_animations()
 
@@ -345,19 +399,32 @@ func transition_to(new_state: CombatState) -> bool:
 			if combat and not combat.start_attack():
 				return false
 			combat_state = CombatState.ATTACK
+			if _combo_step == 0:
+				_combo_step = 1
+			_combo_buffer = 0
+			_combo_queued = false
+			_combo_recovery_timer = 0.0
 			_attack_impact_applied = false
 			_orient_attack_direction()
+			var fwd: Vector3 = (-visuals.global_basis.z) if (visuals and is_third_person) else (-camera.global_basis.z if camera else -global_basis.z)
+			fwd.y = 0.0
+			fwd = fwd.normalized() if fwd.length_squared() > 0.0001 else Vector3.FORWARD
+			if combat and combat.has_method("trigger_attack_telegraph"):
+				combat.trigger_attack_telegraph(fwd, ATTACK_IMPACT_TIMESTAMP)
 			if anim_player and anim_player.has_animation("attack"):
 				anim_player.speed_scale = 1.0
 				anim_player.stop()
 				anim_player.play("attack", 0.05)
+				anim_player.seek(0.0, true)
+			combo_step_changed.emit(_combo_step)
 			state_changed.emit(old_state, combat_state)
 			return true
 
 		CombatState.BLOCK:
-			if is_shield_broken or combat_state == CombatState.ATTACK or combat_state == CombatState.DEAD:
+			if is_shield_broken or combat_state == CombatState.ATTACK or combat_state == CombatState.DEAD or _combo_finisher_recovery_timer > 0.0:
 				# Block rejected while shield broken, attacking, or dead
 				return false
+			reset_combo()
 			combat_state = CombatState.BLOCK
 			_block_transition = "start"
 			if anim_player:
@@ -375,12 +442,15 @@ func transition_to(new_state: CombatState) -> bool:
 func _enter_dead_state() -> void:
 	var old_state: CombatState = combat_state
 	combat_state = CombatState.DEAD
+	reset_combo()
 	_attack_impact_applied = true # Stop any pending impact
 	_block_transition = ""
 
 	# Stop movement and combat actions
 	velocity = Vector3.ZERO
-	if combat and combat.slash_effect:
+	if combat and combat.has_method("stop_slash_effect"):
+		combat.stop_slash_effect()
+	elif combat and combat.slash_effect:
 		combat.slash_effect.visible = false
 
 	# Play dead animation
@@ -396,15 +466,98 @@ func _enter_dead_state() -> void:
 
 
 func can_block() -> bool:
-	return not is_shield_broken and combat_state != CombatState.DEAD and combat_state != CombatState.ATTACK
+	return not is_shield_broken and combat_state != CombatState.DEAD and combat_state != CombatState.ATTACK and _combo_finisher_recovery_timer <= 0.0
+
+
+func is_in_combo_window() -> bool:
+	if combat_state != CombatState.ATTACK:
+		return false
+	if not anim_player or not anim_player.is_playing() or anim_player.current_animation != "attack":
+		return false
+	var pos: float = anim_player.current_animation_position
+	return pos >= COMBO_WINDOW_START and pos <= COMBO_WINDOW_END
+
+
+func is_combo_queued() -> bool:
+	return _combo_buffer > 0 or _combo_queued
+
+
+func get_combo_buffer() -> int:
+	return _combo_buffer
+
+
+func get_combo_step() -> int:
+	return _combo_step
+
+
+func reset_combo(clear_finisher_recovery: bool = true) -> void:
+	var prev_step: int = _combo_step
+	_combo_step = 0
+	_combo_buffer = 0
+	_combo_queued = false
+	_combo_recovery_timer = 0.0
+	if clear_finisher_recovery:
+		_combo_finisher_recovery_timer = 0.0
+	if prev_step != 0:
+		combo_step_changed.emit(0)
+
+
+func _execute_next_combo_attack() -> void:
+	if combat_state == CombatState.DEAD:
+		reset_combo()
+		return
+
+	if combat:
+		combat._cooldown_timer = 0.0
+		combat.start_attack()
+
+	_attack_impact_applied = false
+	_orient_attack_direction()
+
+	var fwd: Vector3 = (-visuals.global_basis.z) if (visuals and is_third_person) else (-camera.global_basis.z if camera else -global_basis.z)
+	fwd.y = 0.0
+	fwd = fwd.normalized() if fwd.length_squared() > 0.0001 else Vector3.FORWARD
+	if combat and combat.has_method("trigger_attack_telegraph"):
+		combat.trigger_attack_telegraph(fwd, ATTACK_IMPACT_TIMESTAMP)
+
+	if anim_player and anim_player.has_animation("attack"):
+		anim_player.speed_scale = 1.0
+		anim_player.stop()
+		anim_player.play("attack", 0.05)
+		anim_player.seek(0.0, true)
+
+	combo_step_changed.emit(_combo_step)
 
 
 func _try_combat_attack() -> bool:
-	return transition_to(CombatState.ATTACK)
+	if combat_state == CombatState.DEAD:
+		return false
+	if _combo_finisher_recovery_timer > 0.0:
+		return false
+	if is_shield_broken or _shield_stun_timer > 0.0:
+		return false
+
+	if combat_state == CombatState.ATTACK:
+		if _combo_step + _combo_buffer < MAX_COMBO_STEP:
+			_combo_buffer += 1
+			_combo_queued = true
+			return true
+		return false
+
+	if combat_state == CombatState.IDLE or combat_state == CombatState.RUN:
+		var success: bool = transition_to(CombatState.ATTACK)
+		if success:
+			_combo_step = 1
+			_combo_buffer = 0
+			_combo_queued = false
+			_combo_recovery_timer = 0.0
+		return success
+
+	return false
 
 
 func _start_block() -> bool:
-	if is_shield_broken or combat_state == CombatState.DEAD:
+	if is_shield_broken or combat_state == CombatState.DEAD or _combo_finisher_recovery_timer > 0.0:
 		return false
 	return transition_to(CombatState.BLOCK)
 
@@ -433,21 +586,14 @@ func _release_block() -> void:
 
 
 func _orient_attack_direction() -> void:
-	if is_third_person and visuals:
-		var input_x: float = Input.get_axis("move_left", "move_right")
-		var input_z: float = Input.get_axis("move_forward", "move_backward")
-		if abs(input_x) > 0.1 or abs(input_z) > 0.1:
-			var cam_yaw_basis: Basis = Basis(Vector3.UP, camera_pivot.rotation.y)
-			var move_dir: Vector3 = (cam_yaw_basis * Vector3(input_x, 0.0, input_z)).normalized()
-			visuals.rotation.y = atan2(-move_dir.x, -move_dir.z)
-		else:
-			visuals.rotation.y = _camera_yaw
+	if visuals:
+		visuals.rotation.y = _camera_yaw
 
 
 const NO_ATTACKER_POS: Vector3 = Vector3(99999.0, 99999.0, 99999.0)
 
 
-func take_damage(amount: float, attacker_pos: Vector3 = NO_ATTACKER_POS, incoming_shield_damage: float = 15.0) -> void:
+func take_damage(amount: float, attacker_pos: Vector3 = NO_ATTACKER_POS, incoming_shield_damage: float = 15.0, spawn_feedback: bool = true) -> void:
 	if combat_state == CombatState.DEAD:
 		# TEST 16: No damage can be processed after DEAD
 		return
@@ -458,22 +604,28 @@ func take_damage(amount: float, attacker_pos: Vector3 = NO_ATTACKER_POS, incomin
 		if combat and combat.is_attack_inside_block_cone(self, attacker_pos, block_cone_deg):
 			was_blocked = true
 			final_damage = amount * (1.0 - block_damage_reduction)
-			if combat and combat.has_method("trigger_block_impact"):
+			if combat:
 				var to_attacker: Vector3 = attacker_pos - global_position
 				to_attacker.y = 0.0
 				var to_attacker_dir: Vector3 = to_attacker.normalized() if to_attacker.length_squared() > 0.0001 else Vector3.FORWARD
 				var incoming_dir: Vector3 = -to_attacker_dir
 				var block_pos: Vector3 = global_position + Vector3(0.0, 0.9, 0.0) + to_attacker_dir * 0.4
-				combat.trigger_block_impact(block_pos, incoming_dir)
+				if combat.has_method("trigger_block_impact"):
+					combat.trigger_block_impact(block_pos, incoming_dir)
+				if spawn_feedback and combat.has_method("spawn_damage_number"):
+					combat.spawn_damage_number(block_pos, final_damage, true, incoming_shield_damage)
 			apply_shield_damage(incoming_shield_damage)
 	else:
 		# Unblocked hit visual feedback on player's body
-		if combat and combat.has_method("trigger_hit_impact") and attacker_pos != NO_ATTACKER_POS:
+		if combat and attacker_pos != NO_ATTACKER_POS:
 			var to_attacker: Vector3 = attacker_pos - global_position
 			to_attacker.y = 0.0
 			var to_attacker_dir: Vector3 = to_attacker.normalized() if to_attacker.length_squared() > 0.0001 else Vector3.FORWARD
 			var hit_pos: Vector3 = global_position + Vector3(0.0, 0.9, 0.0) + to_attacker_dir * 0.35
-			combat.trigger_hit_impact(hit_pos, -to_attacker_dir)
+			if combat.has_method("trigger_hit_impact"):
+				combat.trigger_hit_impact(hit_pos, -to_attacker_dir)
+			if spawn_feedback and combat.has_method("spawn_damage_number"):
+				combat.spawn_damage_number(hit_pos, final_damage, false, 0.0)
 
 	var will_die: bool = (health_component and health_component.current_health - final_damage <= 0.0)
 
@@ -508,6 +660,8 @@ func apply_hit_reaction(hit_dir: Vector3, is_blocked_hit: bool = false) -> void:
 	if combat_state == CombatState.DEAD:
 		return
 	_hit_reaction_count += 1
+	# Hit reaction clears queued combo input but cannot bypass finisher recovery.
+	reset_combo(false)
 
 	var kb_dist: float = block_recoil_distance if is_blocked_hit else hit_knockback_distance
 	var kb_dur: float = 0.08 if is_blocked_hit else hit_knockback_duration
@@ -525,18 +679,59 @@ func apply_hit_reaction(hit_dir: Vector3, is_blocked_hit: bool = false) -> void:
 		_hit_reaction_tween.tween_property(visuals, "rotation:x", orig_rx, hit_reaction_duration - 0.05)\
 			.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN_OUT)
 
-	if not is_third_person and camera_pivot:
-		_apply_camera_hit_kick(is_blocked_hit)
+	apply_camera_recoil(1 if is_blocked_hit else 0)
 
 	hit_reacted.emit(is_blocked_hit, hit_dir)
 
 
 func _apply_camera_hit_kick(is_blocked_hit: bool) -> void:
-	var kick: float = deg_to_rad(0.8) if is_blocked_hit else deg_to_rad(2.0)
-	var t: Tween = create_tween()
-	t.tween_method(func(val: float) -> void:
+	apply_camera_recoil(1 if is_blocked_hit else 0)
+
+
+func apply_camera_recoil(type: int) -> void:
+	if not camera_pivot:
+		return
+	var kick: float = 0.0
+	var duration: float = 0.12
+	match type:
+		0: # NORMAL_HIT
+			kick = deg_to_rad(1.5)
+			duration = 0.12
+		1: # BLOCK
+			kick = deg_to_rad(0.7)
+			duration = 0.10
+		2: # SHIELD_BREAK
+			kick = deg_to_rad(3.5)
+			duration = 0.18
+		_:
+			kick = deg_to_rad(1.5)
+			duration = 0.12
+
+	if _cam_recoil_tween and _cam_recoil_tween.is_valid():
+		_cam_recoil_tween.kill()
+
+	_cam_recoil_pitch = kick
+	_update_camera_rotation()
+
+	_cam_recoil_tween = create_tween()
+	_cam_recoil_tween.tween_method(func(val: float) -> void:
 		_cam_recoil_pitch = val
-	, kick, 0.0, 0.14).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+		_update_camera_rotation()
+	, kick, 0.0, duration).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+	_cam_recoil_tween.tween_callback(func() -> void:
+		_cam_recoil_pitch = 0.0
+		_update_camera_rotation()
+	)
+
+
+func get_camera_recoil_pitch() -> float:
+	return _cam_recoil_pitch
+
+
+func _update_camera_rotation() -> void:
+	if camera_pivot:
+		camera_pivot.rotation.y = _camera_yaw
+		camera_pivot.rotation.x = _camera_pitch + _cam_recoil_pitch
 
 
 func apply_shield_damage(amount: float) -> void:
@@ -547,17 +742,32 @@ func apply_shield_damage(amount: float) -> void:
 	shield_durability_changed.emit(shield_durability, shield_max_durability)
 	if prev_durability > 0.0 and shield_durability <= 0.0:
 		break_shield()
+	else:
+		_update_low_shield_state()
+
+
+func _update_low_shield_state() -> void:
+	var should_warn: bool = (shield_state == ShieldState.READY and shield_durability > 0.0 and shield_durability <= low_shield_threshold)
+	if should_warn != is_low_shield:
+		is_low_shield = should_warn
+		low_shield_warning_changed.emit(is_low_shield)
 
 
 func break_shield() -> void:
 	if shield_state == ShieldState.BROKEN or combat_state == CombatState.DEAD:
 		return
+	# Shield break must not be usable to skip a pending combo-finisher recovery.
+	reset_combo(false)
 	shield_state = ShieldState.BROKEN
 	_shield_break_count += 1
 	_shield_stun_timer = shield_break_stun_duration
-	_shield_recovery_timer = shield_recovery_delay
+	if shield_recovery_mode == ShieldRecoveryMode.TEST_ARENA:
+		_shield_recovery_timer = shield_recovery_delay
+	else:
+		_shield_recovery_timer = 0.0
 	shield_durability = 0.0
 	shield_durability_changed.emit(0.0, shield_max_durability)
+	_update_low_shield_state()
 
 	# If currently blocking, immediately exit block state
 	if combat_state == CombatState.BLOCK:
@@ -586,8 +796,7 @@ func break_shield() -> void:
 		_hit_reaction_tween.tween_property(visuals, "rotation:x", 0.0, 0.25)\
 			.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN_OUT)
 
-	if not is_third_person and camera_pivot:
-		_apply_camera_hit_kick(false)
+	apply_camera_recoil(2)
 
 	# Trigger ShieldBreakVFX
 	if combat and combat.has_method("trigger_shield_break"):
@@ -599,6 +808,8 @@ func break_shield() -> void:
 			fwd = Vector3.FORWARD
 		var break_pos: Vector3 = global_position + Vector3(0.0, 0.9, 0.0) + fwd * 0.45
 		combat.trigger_shield_break(break_pos, -fwd)
+		if combat_feedback:
+			combat_feedback.trigger_shield_break_feedback(break_pos)
 
 	shield_broken.emit()
 
@@ -611,10 +822,12 @@ func _restore_shield() -> void:
 	_shield_recovery_timer = 0.0
 	shield_durability = shield_max_durability
 	shield_durability_changed.emit(shield_durability, shield_max_durability)
+	_update_low_shield_state()
 	shield_restored.emit()
 
 
-func reset_shield_durability() -> void:
+func reset_shield_for_new_round() -> void:
+	var was_broken: bool = (shield_state == ShieldState.BROKEN)
 	shield_state = ShieldState.READY
 	_shield_stun_timer = 0.0
 	_shield_recovery_timer = 0.0
@@ -622,6 +835,13 @@ func reset_shield_durability() -> void:
 	_knockback_vel = Vector3.ZERO
 	shield_durability = shield_max_durability
 	shield_durability_changed.emit(shield_durability, shield_max_durability)
+	_update_low_shield_state()
+	if was_broken:
+		shield_restored.emit()
+
+
+func reset_shield_durability() -> void:
+	reset_shield_for_new_round()
 
 
 func respawn(spawn_pos: Vector3 = Vector3.ZERO, spawn_yaw: float = 0.0) -> void:
@@ -632,8 +852,8 @@ func respawn(spawn_pos: Vector3 = Vector3.ZERO, spawn_yaw: float = 0.0) -> void:
 	if health_component:
 		health_component.reset_health()
 
-	# 2. Reset Shield
-	reset_shield_durability()
+	# 2. Reset Shield for new life/round
+	reset_shield_for_new_round()
 
 	# 3. Clear timers and internal states
 	_shield_stun_timer = 0.0
@@ -643,12 +863,15 @@ func respawn(spawn_pos: Vector3 = Vector3.ZERO, spawn_yaw: float = 0.0) -> void:
 	_knockback_timer = 0.0
 	_knockback_vel = Vector3.ZERO
 	_cam_recoil_pitch = 0.0
+	if _cam_recoil_tween and _cam_recoil_tween.is_valid():
+		_cam_recoil_tween.kill()
 	if _hit_reaction_tween and _hit_reaction_tween.is_valid():
 		_hit_reaction_tween.kill()
 
 	# 4. Stop active VFX
 	if combat:
 		combat.stop_slash_effect()
+		combat._cooldown_timer = 0.0
 
 	# 5. Position, yaw, and velocity
 	velocity = Vector3.ZERO
@@ -664,6 +887,7 @@ func respawn(spawn_pos: Vector3 = Vector3.ZERO, spawn_yaw: float = 0.0) -> void:
 		visuals.rotation.y = _camera_yaw
 
 	# 6. Reset combat state to IDLE & restore locomotion animation
+	reset_combo()
 	var old_state: CombatState = combat_state
 	combat_state = CombatState.IDLE
 	if anim_player and anim_player.has_animation("idle"):
@@ -675,6 +899,8 @@ func respawn(spawn_pos: Vector3 = Vector3.ZERO, spawn_yaw: float = 0.0) -> void:
 
 
 func _on_health_died() -> void:
+	if combat_feedback:
+		combat_feedback.play_audio_event("death")
 	transition_to(CombatState.DEAD)
 
 
@@ -685,6 +911,23 @@ func _on_animation_finished(anim_name: StringName) -> void:
 
 	if anim_name == "attack":
 		_attack_impact_applied = false
+		if combat and combat.has_method("stop_slash_effect"):
+			combat.stop_slash_effect()
+
+		if (_combo_buffer > 0 or _combo_queued) and _combo_step < MAX_COMBO_STEP:
+			_combo_step += 1
+			if _combo_buffer > 0:
+				_combo_buffer -= 1
+			_combo_queued = (_combo_buffer > 0)
+			_execute_next_combo_attack()
+			return
+
+		_combo_buffer = 0
+		_combo_queued = false
+		_combo_recovery_timer = combo_recovery_timeout
+		if _combo_step == MAX_COMBO_STEP:
+			_combo_finisher_recovery_timer = COMBO_FINISHER_RECOVERY
+
 		var horiz_sq: float = velocity.x * velocity.x + velocity.z * velocity.z
 		var input_x: float = Input.get_axis("move_left", "move_right")
 		var input_z: float = Input.get_axis("move_forward", "move_backward")
@@ -786,6 +1029,8 @@ func set_third_person(enabled: bool) -> void:
 	if camera:
 		camera.position = Vector3(0, 0, third_person_distance) if is_third_person else Vector3.ZERO
 		camera.near = 0.05 if is_third_person else 0.08
+		camera.h_offset = 0.0
+		camera.v_offset = 0.0
 	_update_head_visibility()
 
 

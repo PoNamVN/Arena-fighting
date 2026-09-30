@@ -1,0 +1,28 @@
+[gd_scene load_steps=2 format=3 uid="uid://b7v4k2q8x1m9e"]
+
+[ext_resource type="Script" path="res://scripts/DamageNumberVFX.gd" id="1_damage_vfx"]
+
+[node name="DamageNumberVFX" type="Node3D"]
+visible = false
+script = ExtResource("1_damage_vfx")
+
+[node name="HPLabel" type="Label3D" parent="."]
+billboard = 2
+no_depth_test = true
+text = "25"
+font_size = 44
+outline_size = 10
+outline_modulate = Color(0.04, 0.04, 0.04, 1)
+pixel_size = 0.005
+
+[node name="ShieldLabel" type="Label3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -0.22, 0)
+visible = false
+billboard = 2
+no_depth_test = true
+modulate = Color(0.35, 0.7, 1, 1)
+text = "Shield -15"
+font_size = 32
+outline_size = 8
+outline_modulate = Color(0.04, 0.04, 0.04, 1)
+pixel_size = 0.0035

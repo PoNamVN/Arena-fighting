@@ -8,6 +8,7 @@ extends CanvasLayer
 @onready var shield_bar: ProgressBar = get_node_or_null("RootControl/StatsPanel/VBoxContainer/ShieldContainer/ShieldProgressBar") as ProgressBar
 @onready var shield_label: Label = get_node_or_null("RootControl/StatsPanel/VBoxContainer/ShieldContainer/ShieldLabel") as Label
 @onready var status_label: Label = get_node_or_null("RootControl/StatsPanel/VBoxContainer/StatusContainer/StatusLabel") as Label
+@onready var low_shield_warning: Label = get_node_or_null("RootControl/StatsPanel/VBoxContainer/StatusContainer/LowShieldWarning") as Label
 @onready var break_banner: Label = get_node_or_null("RootControl/BreakBanner") as Label
 @onready var respawn_banner: Label = get_node_or_null("RootControl/RespawnBanner") as Label
 
@@ -20,6 +21,8 @@ func _ready() -> void:
 		break_banner.visible = false
 	if respawn_banner:
 		respawn_banner.visible = false
+	if low_shield_warning:
+		low_shield_warning.visible = false
 	
 	if not player:
 		player = _find_player()
@@ -46,17 +49,21 @@ func _setup_player_connections(p: PlayerController) -> void:
 		p.shield_broken.connect(_on_shield_broken)
 	if not p.shield_restored.is_connected(_on_shield_restored):
 		p.shield_restored.connect(_on_shield_restored)
-	
+	if p.has_signal("low_shield_warning_changed"):
+		if not p.low_shield_warning_changed.is_connected(_on_low_shield_warning_changed):
+			p.low_shield_warning_changed.connect(_on_low_shield_warning_changed)
+
 	if p.health_component:
 		if not p.health_component.health_changed.is_connected(_on_health_changed):
 			p.health_component.health_changed.connect(_on_health_changed)
 		if not p.health_component.died.is_connected(_on_player_died):
 			p.health_component.died.connect(_on_player_died)
-			
+
 	# Initial UI refresh
 	if p.health_component:
 		_on_health_changed(p.health_component.current_health, p.health_component.max_health)
 	_on_shield_durability_changed(p.shield_durability, p.shield_max_durability)
+	_on_low_shield_warning_changed(p.get("is_low_shield") if "is_low_shield" in p else false)
 
 
 func _process(_delta: float) -> void:
@@ -141,6 +148,11 @@ func _on_player_died() -> void:
 		respawn_banner.text = "PLAYER DEFEATED\nRespawning in 1.5s..."
 
 
+func _on_low_shield_warning_changed(is_active: bool) -> void:
+	if low_shield_warning:
+		low_shield_warning.visible = is_active
+
+
 func on_player_respawned() -> void:
 	if respawn_banner:
 		if _respawn_tween and _respawn_tween.is_valid():
@@ -148,6 +160,7 @@ func on_player_respawned() -> void:
 		respawn_banner.visible = false
 	if break_banner:
 		break_banner.visible = false
+	_on_low_shield_warning_changed(false)
 	if player and player.health_component:
 		_on_health_changed(player.health_component.current_health, player.health_component.max_health)
 		_on_shield_durability_changed(player.shield_durability, player.shield_max_durability)

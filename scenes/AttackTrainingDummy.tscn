@@ -2,6 +2,7 @@
 
 [ext_resource type="Script" path="res://scripts/AttackTrainingDummy.gd" id="1_script"]
 [ext_resource type="PackedScene" uid="uid://cjdsemtu0ldhu" path="res://assets/models/player_character.glb" id="2_character"]
+[ext_resource type="PackedScene" uid="uid://d1p8x4w2m7r9k" path="res://scenes/AttackTelegraphVFX.tscn" id="3_telegraph"]
 
 [sub_resource type="CapsuleShape3D" id="CapsuleShape3D_dummy"]
 radius = 0.4
@@ -18,3 +19,5 @@ shape = SubResource("CapsuleShape3D_dummy")
 [node name="Visuals" type="Node3D" parent="."]
 
 [node name="CharacterModel" parent="Visuals" instance=ExtResource("2_character")]
+
+[node name="AttackTelegraphVFX" parent="." instance=ExtResource("3_telegraph")]

@@ -1,0 +1,30 @@
+[gd_scene load_steps=2 format=3 uid="uid://b7v9x2m4r1k5p"]
+
+[ext_resource type="Script" path="res://scripts/CombatFeedback.gd" id="1_feedback"]
+
+[node name="CombatFeedback" type="CanvasLayer"]
+layer = 5
+script = ExtResource("1_feedback")
+
+[node name="ScreenEmphasis" type="ColorRect" parent="."]
+visible = false
+modulate = Color(1, 1, 1, 0)
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+color = Color(0.25, 0.65, 1, 1)
+
+[node name="Audio" type="Node" parent="."]
+
+[node name="AttackSFX" type="AudioStreamPlayer" parent="Audio"]
+
+[node name="HitSFX" type="AudioStreamPlayer" parent="Audio"]
+
+[node name="BlockSFX" type="AudioStreamPlayer" parent="Audio"]
+
+[node name="ShieldBreakSFX" type="AudioStreamPlayer" parent="Audio"]
+
+[node name="DeathSFX" type="AudioStreamPlayer" parent="Audio"]

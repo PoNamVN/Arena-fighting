@@ -30,6 +30,7 @@ const NO_ATTACKER_POS: Vector3 = Vector3(99999.0, 99999.0, 99999.0)
 var shield_durability: float = 100.0
 var is_shield_broken: bool = false
 var _shield_recovery_timer: float = 0.0
+var _last_hit_was_blocked: bool = false
 
 signal shield_durability_changed(current: float, maximum: float)
 signal shield_broken()
@@ -75,11 +76,13 @@ func _process(delta: float) -> void:
 				restore_shield()
 
 
-func take_damage(amount: float, attacker_pos: Vector3 = NO_ATTACKER_POS) -> void:
+func take_damage(amount: float, attacker_pos: Vector3 = NO_ATTACKER_POS, was_blocked: bool = false) -> void:
 	if health_component and health_component.is_dead():
 		return
 
 	var will_die: bool = (health_component and health_component.current_health - amount <= 0.0)
+	var blocked: bool = was_blocked or (amount < 20.0 and amount > 0.0)
+	_last_hit_was_blocked = blocked
 
 	if health_component:
 		health_component.take_damage(amount)
@@ -88,7 +91,7 @@ func take_damage(amount: float, attacker_pos: Vector3 = NO_ATTACKER_POS) -> void
 		var to_me: Vector3 = global_position - attacker_pos
 		to_me.y = 0.0
 		var hit_dir: Vector3 = to_me.normalized() if to_me.length_squared() > 0.0001 else Vector3.BACK
-		_apply_dummy_reaction(hit_dir, is_blocking)
+		_apply_dummy_reaction(hit_dir, blocked)
 
 
 func _apply_dummy_reaction(hit_dir: Vector3, is_blocked_hit: bool) -> void:
@@ -155,7 +158,8 @@ func reset_shield_durability() -> void:
 
 
 func _on_damaged(_amount: float) -> void:
-	_flash_hit_effect()
+	if not _last_hit_was_blocked:
+		_flash_hit_effect()
 
 
 func _on_health_changed(new_health: float, max_hp: float) -> void:
@@ -196,9 +200,19 @@ func reset_dummy() -> void:
 		_update_health_bar(health_component.current_health, health_component.max_health)
 
 	reset_shield_durability()
+	_last_hit_was_blocked = false
 
 	if _mesh_material:
 		_mesh_material.albedo_color = normal_color
+
+
+var is_flashing_hit: bool:
+	get:
+		return _hit_tween != null and _hit_tween.is_valid()
+
+
+func flash_hit() -> void:
+	_flash_hit_effect()
 
 
 func _flash_hit_effect() -> void:
