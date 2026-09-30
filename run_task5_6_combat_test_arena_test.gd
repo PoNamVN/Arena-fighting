@@ -35,7 +35,7 @@ func _setup_scene() -> void:
 	var arena_scene: PackedScene = load("res://scenes/CombatTestArena.tscn")
 	_arena = arena_scene.instantiate() as Node3D
 	root.add_child(_arena)
-	
+
 	_player = _arena.get_node("Player") as PlayerController
 	_attack_dummy = _arena.get_node("AttackTrainingDummy") as AttackTrainingDummy
 	_training_dummy = _arena.get_node("TrainingDummy") as TrainingDummy
@@ -153,6 +153,7 @@ func _run_tests() -> void:
 	# -----------------------------------------------------------------
 	# TEST 9: Player can block dummy attack
 	# -----------------------------------------------------------------
+	p.global_position = Vector3(0, 0.1, 0)
 	p.health_component.reset_health()
 	p.reset_shield_durability()
 	# Face dummy at (0, 0, -1.8) -> player at (0, 0, 0) faces -Z (yaw = 0)
@@ -183,12 +184,14 @@ func _run_tests() -> void:
 	# TEST 11: Shield reaches 0 after expected number of blocks (6 more blocks)
 	# -----------------------------------------------------------------
 	for b in range(5):
+		p.global_position = Vector3(0, 0.1, 0)
 		ad.trigger_attack_now()
 		while ad.is_attacking():
 			await process_frame
 
 	var dur_at_10: float = p.shield_durability # Should be 10.0
 	# 7th block: 10 -> 0
+	p.global_position = Vector3(0, 0.1, 0)
 	ad.trigger_attack_now()
 	while ad.is_attacking():
 		await process_frame

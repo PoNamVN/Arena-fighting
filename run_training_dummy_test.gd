@@ -39,12 +39,12 @@ func _setup() -> void:
 func _run_test_suite() -> void:
 	_setup()
 	for i in range(10): await process_frame
-	
+
 	# Disable auto_attack on attack dummy initially to control test sequence
 	_attack_dummy.auto_attack = false
 	if _attack_dummy._cycle_tween and _attack_dummy._cycle_tween.is_valid():
 		_attack_dummy._cycle_tween.kill()
-		
+
 	# -----------------------------------------------------------------
 	# TEST 1: Existing TrainingDummy starts at full HP
 	# -----------------------------------------------------------------
@@ -62,7 +62,7 @@ func _run_test_suite() -> void:
 	_player.camera_pivot.rotation.y = 0.0
 	_player.visuals.rotation.y = 0.0
 	await process_frame
-	
+
 	var hp_before_t2: float = _training_dummy.health_component.current_health
 	_player._try_combat_attack()
 	while _player._is_attacking or _player.combat._cooldown_timer > 0.0:
@@ -145,7 +145,7 @@ func _run_test_suite() -> void:
 	_player.visuals.rotation.y = 0.0
 	_player.health_component.reset_health()
 	await process_frame
-	
+
 	_attack_dummy.trigger_attack_now()
 	var attack_active_t9: bool = _attack_dummy.is_attacking()
 	var t9_pass: bool = attack_active_t9
@@ -167,6 +167,7 @@ func _run_test_suite() -> void:
 	# -----------------------------------------------------------------
 	# TEST 11: Player can block the AttackTrainingDummy
 	# -----------------------------------------------------------------
+	_player.global_position = Vector3(0, 0, 0)
 	_player.health_component.reset_health()
 	_player.reset_shield_durability()
 	_player.transition_to(PlayerController.CombatState.BLOCK)
@@ -191,13 +192,14 @@ func _run_test_suite() -> void:
 	# TEST 13: Rear attack is not blocked by player's 120-degree cone
 	# -----------------------------------------------------------------
 	# Player at (0, 0, 0) blocks facing South (+Z), away from dummy at (0, 0, -1.8)
+	_player.global_position = Vector3(0, 0, 0)
 	_player._camera_yaw = deg_to_rad(180.0)
 	_player.camera_pivot.rotation.y = deg_to_rad(180.0)
 	_player.visuals.rotation.y = deg_to_rad(180.0)
 	_player.health_component.reset_health()
 	_player.reset_shield_durability()
 	await process_frame
-	
+
 	var hp_before_t13: float = _player.health_component.current_health
 	var dur_before_t13: float = _player.shield_durability
 	_attack_dummy.trigger_attack_now()
@@ -234,13 +236,14 @@ func _run_test_suite() -> void:
 	# TEST 16: Successful block reduces Shield Durability by 15.0
 	# -----------------------------------------------------------------
 	# Face dummy again
+	_player.global_position = Vector3(0, 0, 0)
 	_player._camera_yaw = 0.0
 	_player.camera_pivot.rotation.y = 0.0
 	_player.visuals.rotation.y = 0.0
 	_player.reset_shield_durability()
 	_player.transition_to(PlayerController.CombatState.BLOCK)
 	await process_frame
-	
+
 	var dur_before_t16: float = _player.shield_durability
 	_attack_dummy.trigger_attack_now()
 	await create_timer(0.85).timeout
@@ -253,10 +256,11 @@ func _run_test_suite() -> void:
 	# -----------------------------------------------------------------
 	# TEST 17: Non-blocked attacks do not reduce Shield Durability
 	# -----------------------------------------------------------------
+	_player.global_position = Vector3(0, 0, 0)
 	_player.transition_to(PlayerController.CombatState.IDLE)
 	_player.reset_shield_durability()
 	await process_frame
-	
+
 	var dur_before_t17: float = _player.shield_durability
 	_attack_dummy.trigger_attack_now()
 	await create_timer(0.85).timeout
@@ -276,7 +280,7 @@ func _run_test_suite() -> void:
 			passed += 1
 	print("TRAINING DUMMY UPGRADE SUMMARY: %d / %d TESTS PASSED" % [passed, total])
 	print("=================================================================")
-	
+
 	if passed == total:
 		quit(0)
 	else:

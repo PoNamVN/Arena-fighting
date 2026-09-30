@@ -40,6 +40,18 @@ signal state_changed(old_state: CombatState, new_state: CombatState)
 @export var shield_recovery_delay: float = 2.0
 var shield_durability: float = 100.0
 
+## Task 5.7: Hit Reaction, Knockback & Combat Feel Tuning
+@export var hit_reaction_duration: float = 0.15
+@export var hit_knockback_distance: float = 0.40
+@export var hit_knockback_duration: float = 0.10
+@export var block_recoil_distance: float = 0.08
+
+var _knockback_timer: float = 0.0
+var _knockback_vel: Vector3 = Vector3.ZERO
+var _hit_reaction_tween: Tween = null
+var _hit_reaction_count: int = 0
+var _cam_recoil_pitch: float = 0.0
+
 enum ShieldState {
 	READY,
 	BROKEN
@@ -63,6 +75,7 @@ var _shield_break_count: int = 0
 signal shield_durability_changed(current: float, maximum: float)
 signal shield_broken()
 signal shield_restored()
+signal hit_reacted(is_blocked: bool, hit_dir: Vector3)
 
 ## Node References
 @onready var visuals: Node3D = $Visuals
@@ -122,7 +135,7 @@ func _ready() -> void:
 		spring_arm.add_excluded_object(get_rid())
 	_setup_animation_player()
 	set_third_person(is_third_person)
-	
+
 	if health_component:
 		if not health_component.died.is_connected(_on_health_died):
 			health_component.died.connect(_on_health_died)
@@ -154,7 +167,7 @@ func _unhandled_input(event: InputEvent) -> void:
 		_camera_yaw -= motion.relative.x * mouse_sensitivity
 		_camera_pitch -= motion.relative.y * mouse_sensitivity
 		_camera_pitch = clampf(_camera_pitch, deg_to_rad(min_pitch), deg_to_rad(max_pitch))
-		
+
 		if camera_pivot:
 			camera_pivot.rotation.y = _camera_yaw
 			camera_pivot.rotation.x = _camera_pitch
@@ -183,6 +196,8 @@ func _unhandled_input(event: InputEvent) -> void:
 func _physics_process(delta: float) -> void:
 	# DEAD state locks character in place
 	if combat_state == CombatState.DEAD:
+		_knockback_timer = 0.0
+		_knockback_vel = Vector3.ZERO
 		velocity.x = 0.0
 		velocity.z = 0.0
 		if not is_on_floor():
@@ -214,7 +229,7 @@ func _physics_process(delta: float) -> void:
 	# Calculate Camera-Relative Input
 	var input_x: float = Input.get_axis("move_left", "move_right")
 	var input_z: float = Input.get_axis("move_forward", "move_backward")
-	
+
 	var move_dir: Vector3 = Vector3.ZERO
 	if camera_pivot:
 		var cam_yaw_basis: Basis = Basis(Vector3.UP, camera_pivot.rotation.y)
@@ -234,12 +249,20 @@ func _physics_process(delta: float) -> void:
 	if _shield_stun_timer > 0.0:
 		target_horizontal = Vector3.ZERO # Stop movement during shield break stun
 
-	# Accelerate or Decelerate Horizontally
-	var current_horizontal: Vector3 = Vector3(velocity.x, 0.0, velocity.z)
-	var lerp_rate: float = acceleration if move_dir.length_squared() > 0.001 else friction
-	var new_horizontal: Vector3 = current_horizontal.lerp(target_horizontal, lerp_rate * delta)
-	velocity.x = new_horizontal.x
-	velocity.z = new_horizontal.z
+	# Accelerate or Decelerate Horizontally / Apply Knockback
+	if _knockback_timer > 0.0:
+		_knockback_timer = maxf(0.0, _knockback_timer - delta)
+		velocity.x = _knockback_vel.x
+		velocity.z = _knockback_vel.z
+		if _knockback_timer <= 0.0:
+			velocity.x = 0.0
+			velocity.z = 0.0
+	else:
+		var current_horizontal: Vector3 = Vector3(velocity.x, 0.0, velocity.z)
+		var lerp_rate: float = acceleration if move_dir.length_squared() > 0.001 else friction
+		var new_horizontal: Vector3 = current_horizontal.lerp(target_horizontal, lerp_rate * delta)
+		velocity.x = new_horizontal.x
+		velocity.z = new_horizontal.z
 
 	# Rotate Character Visuals
 	if visuals:
@@ -256,8 +279,8 @@ func _physics_process(delta: float) -> void:
 
 	move_and_slide()
 
-	# FSM Locomotion transitions (only when in IDLE or RUN)
-	if combat_state == CombatState.IDLE or combat_state == CombatState.RUN:
+	# FSM Locomotion transitions (only when in IDLE or RUN and not in knockback)
+	if (combat_state == CombatState.IDLE or combat_state == CombatState.RUN) and _knockback_timer <= 0.0:
 		var horiz_sq: float = velocity.x * velocity.x + velocity.z * velocity.z
 		if horiz_sq > 0.05 or move_dir.length_squared() > 0.001:
 			if combat_state != CombatState.RUN:
@@ -273,7 +296,7 @@ func _physics_process(delta: float) -> void:
 				_attack_impact_applied = true
 				if combat:
 					combat.execute_impact()
-					
+
 	_update_locomotion_animations()
 
 
@@ -354,12 +377,12 @@ func _enter_dead_state() -> void:
 	combat_state = CombatState.DEAD
 	_attack_impact_applied = true # Stop any pending impact
 	_block_transition = ""
-	
+
 	# Stop movement and combat actions
 	velocity = Vector3.ZERO
 	if combat and combat.slash_effect:
 		combat.slash_effect.visible = false
-	
+
 	# Play dead animation
 	if anim_player and anim_player.has_animation("dead"):
 		anim_player.speed_scale = 1.0
@@ -368,7 +391,7 @@ func _enter_dead_state() -> void:
 		if anim:
 			anim.loop_mode = Animation.LOOP_NONE
 		anim_player.play("dead", 0.1)
-		
+
 	state_changed.emit(old_state, combat_state)
 
 
@@ -389,23 +412,23 @@ func _start_block() -> bool:
 func _release_block() -> void:
 	if combat_state != CombatState.BLOCK:
 		return
-	
+
 	var horiz_sq: float = velocity.x * velocity.x + velocity.z * velocity.z
 	var input_x: float = Input.get_axis("move_left", "move_right")
 	var input_z: float = Input.get_axis("move_forward", "move_backward")
-	var is_moving: bool = abs(input_x) > 0.1 or abs(input_z) > 0.1 or horiz_sq > 0.05
-	
+	var is_moving: bool = (abs(input_x) > 0.1 or abs(input_z) > 0.1) or (horiz_sq > 0.05 and _knockback_timer <= 0.0)
+
 	var old_state: CombatState = combat_state
 	combat_state = CombatState.RUN if is_moving else CombatState.IDLE
 	_block_transition = "releasing"
-	
+
 	if anim_player and anim_player.has_animation("block_release"):
 		anim_player.speed_scale = 1.4 # Snappy return to stance
 		anim_player.play("block_release", 0.08)
 	else:
 		_block_transition = ""
 		_update_locomotion_animations()
-		
+
 	state_changed.emit(old_state, combat_state)
 
 
@@ -428,10 +451,12 @@ func take_damage(amount: float, attacker_pos: Vector3 = NO_ATTACKER_POS, incomin
 	if combat_state == CombatState.DEAD:
 		# TEST 16: No damage can be processed after DEAD
 		return
-	
+
 	var final_damage: float = amount
+	var was_blocked: bool = false
 	if combat_state == CombatState.BLOCK and not is_shield_broken and attacker_pos != NO_ATTACKER_POS:
 		if combat and combat.is_attack_inside_block_cone(self, attacker_pos, block_cone_deg):
+			was_blocked = true
 			final_damage = amount * (1.0 - block_damage_reduction)
 			if combat and combat.has_method("trigger_block_impact"):
 				var to_attacker: Vector3 = attacker_pos - global_position
@@ -449,11 +474,69 @@ func take_damage(amount: float, attacker_pos: Vector3 = NO_ATTACKER_POS, incomin
 			var to_attacker_dir: Vector3 = to_attacker.normalized() if to_attacker.length_squared() > 0.0001 else Vector3.FORWARD
 			var hit_pos: Vector3 = global_position + Vector3(0.0, 0.9, 0.0) + to_attacker_dir * 0.35
 			combat.trigger_hit_impact(hit_pos, -to_attacker_dir)
-	
+
+	var will_die: bool = (health_component and health_component.current_health - final_damage <= 0.0)
+
+	# Apply hit reaction and knockback only if target survives
+	if not will_die and attacker_pos != NO_ATTACKER_POS:
+		var to_me: Vector3 = global_position - attacker_pos
+		to_me.y = 0.0
+		var hit_dir: Vector3 = to_me.normalized() if to_me.length_squared() > 0.0001 else (-visuals.global_basis.z if visuals else Vector3.BACK)
+		apply_hit_reaction(hit_dir, was_blocked)
+
 	if health_component:
 		health_component.take_damage(final_damage)
 	elif final_damage > 0.0:
 		transition_to(CombatState.DEAD)
+
+
+func apply_knockback(direction: Vector3, distance: float, duration: float) -> void:
+	if combat_state == CombatState.DEAD:
+		return
+	var flat_dir: Vector3 = direction
+	flat_dir.y = 0.0
+	if flat_dir.length_squared() < 0.0001:
+		flat_dir = -visuals.global_basis.z if visuals else Vector3.BACK
+	flat_dir = flat_dir.normalized()
+
+	var safe_dur: float = maxf(0.01, duration)
+	_knockback_timer = safe_dur
+	_knockback_vel = flat_dir * (distance / safe_dur)
+
+
+func apply_hit_reaction(hit_dir: Vector3, is_blocked_hit: bool = false) -> void:
+	if combat_state == CombatState.DEAD:
+		return
+	_hit_reaction_count += 1
+
+	var kb_dist: float = block_recoil_distance if is_blocked_hit else hit_knockback_distance
+	var kb_dur: float = 0.08 if is_blocked_hit else hit_knockback_duration
+	apply_knockback(hit_dir, kb_dist, kb_dur)
+
+	# Procedural visual flinch
+	if visuals:
+		if _hit_reaction_tween and _hit_reaction_tween.is_valid():
+			_hit_reaction_tween.kill()
+		_hit_reaction_tween = create_tween()
+		var tilt_mag: float = deg_to_rad(3.5) if is_blocked_hit else deg_to_rad(10.0)
+		var orig_rx: float = 0.0
+		_hit_reaction_tween.tween_property(visuals, "rotation:x", orig_rx - tilt_mag, 0.05)\
+			.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+		_hit_reaction_tween.tween_property(visuals, "rotation:x", orig_rx, hit_reaction_duration - 0.05)\
+			.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN_OUT)
+
+	if not is_third_person and camera_pivot:
+		_apply_camera_hit_kick(is_blocked_hit)
+
+	hit_reacted.emit(is_blocked_hit, hit_dir)
+
+
+func _apply_camera_hit_kick(is_blocked_hit: bool) -> void:
+	var kick: float = deg_to_rad(0.8) if is_blocked_hit else deg_to_rad(2.0)
+	var t: Tween = create_tween()
+	t.tween_method(func(val: float) -> void:
+		_cam_recoil_pitch = val
+	, kick, 0.0, 0.14).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
 
 
 func apply_shield_damage(amount: float) -> void:
@@ -475,7 +558,7 @@ func break_shield() -> void:
 	_shield_recovery_timer = shield_recovery_delay
 	shield_durability = 0.0
 	shield_durability_changed.emit(0.0, shield_max_durability)
-	
+
 	# If currently blocking, immediately exit block state
 	if combat_state == CombatState.BLOCK:
 		var old_state: CombatState = combat_state
@@ -483,11 +566,29 @@ func break_shield() -> void:
 		_block_transition = ""
 		state_changed.emit(old_state, combat_state)
 		_update_locomotion_animations()
-	
+
 	# Stop horizontal movement for stagger
 	velocity.x = 0.0
 	velocity.z = 0.0
-	
+
+	# Task 5.7: Stronger shield break recoil & visual stagger
+	var break_kb_dir: Vector3 = (-visuals.global_basis.z) if (visuals and is_third_person) else (-camera.global_basis.z if camera else -global_basis.z)
+	break_kb_dir.y = 0.0
+	var stagger_dir: Vector3 = -break_kb_dir.normalized() if break_kb_dir.length_squared() > 0.0001 else Vector3.BACK
+	apply_knockback(stagger_dir, 0.35, 0.12)
+
+	if visuals:
+		if _hit_reaction_tween and _hit_reaction_tween.is_valid():
+			_hit_reaction_tween.kill()
+		_hit_reaction_tween = create_tween()
+		_hit_reaction_tween.tween_property(visuals, "rotation:x", -deg_to_rad(14.0), 0.08)\
+			.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+		_hit_reaction_tween.tween_property(visuals, "rotation:x", 0.0, 0.25)\
+			.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN_OUT)
+
+	if not is_third_person and camera_pivot:
+		_apply_camera_hit_kick(false)
+
 	# Trigger ShieldBreakVFX
 	if combat and combat.has_method("trigger_shield_break"):
 		var fwd: Vector3 = (-visuals.global_basis.z) if (visuals and is_third_person) else (-camera.global_basis.z if camera else -global_basis.z)
@@ -498,7 +599,7 @@ func break_shield() -> void:
 			fwd = Vector3.FORWARD
 		var break_pos: Vector3 = global_position + Vector3(0.0, 0.9, 0.0) + fwd * 0.45
 		combat.trigger_shield_break(break_pos, -fwd)
-	
+
 	shield_broken.emit()
 
 
@@ -517,6 +618,8 @@ func reset_shield_durability() -> void:
 	shield_state = ShieldState.READY
 	_shield_stun_timer = 0.0
 	_shield_recovery_timer = 0.0
+	_knockback_timer = 0.0
+	_knockback_vel = Vector3.ZERO
 	shield_durability = shield_max_durability
 	shield_durability_changed.emit(shield_durability, shield_max_durability)
 
@@ -537,6 +640,11 @@ func respawn(spawn_pos: Vector3 = Vector3.ZERO, spawn_yaw: float = 0.0) -> void:
 	_shield_recovery_timer = 0.0
 	_attack_impact_applied = false
 	_block_transition = ""
+	_knockback_timer = 0.0
+	_knockback_vel = Vector3.ZERO
+	_cam_recoil_pitch = 0.0
+	if _hit_reaction_tween and _hit_reaction_tween.is_valid():
+		_hit_reaction_tween.kill()
 
 	# 4. Stop active VFX
 	if combat:
@@ -544,6 +652,8 @@ func respawn(spawn_pos: Vector3 = Vector3.ZERO, spawn_yaw: float = 0.0) -> void:
 
 	# 5. Position, yaw, and velocity
 	velocity = Vector3.ZERO
+	if visuals:
+		visuals.rotation.x = 0.0
 	global_position = spawn_pos
 	_camera_yaw = spawn_yaw
 	_camera_pitch = 0.0
@@ -578,8 +688,8 @@ func _on_animation_finished(anim_name: StringName) -> void:
 		var horiz_sq: float = velocity.x * velocity.x + velocity.z * velocity.z
 		var input_x: float = Input.get_axis("move_left", "move_right")
 		var input_z: float = Input.get_axis("move_forward", "move_backward")
-		var has_move_input: bool = abs(input_x) > 0.1 or abs(input_z) > 0.1 or horiz_sq > 0.05
-		
+		var has_move_input: bool = (abs(input_x) > 0.1 or abs(input_z) > 0.1) or (horiz_sq > 0.05 and _knockback_timer <= 0.0)
+
 		var next_state: CombatState = CombatState.RUN if has_move_input else CombatState.IDLE
 		combat_state = next_state
 		state_changed.emit(CombatState.ATTACK, next_state)
@@ -599,7 +709,7 @@ func _on_animation_finished(anim_name: StringName) -> void:
 func _update_locomotion_animations() -> void:
 	if not anim_player or combat_state == CombatState.DEAD or combat_state == CombatState.ATTACK or combat_state == CombatState.BLOCK:
 		return
-	
+
 	if _block_transition == "releasing":
 		if anim_player.is_playing() and anim_player.current_animation == "block_release":
 			return
@@ -638,7 +748,7 @@ func _setup_animation_player() -> void:
 			if _skeleton:
 				_head_bone_idx = _skeleton.find_bone("head")
 				_neck_bone_idx = _skeleton.find_bone("neck")
-	
+
 	if anim_player:
 		# Configure loop modes for locomotion and combat
 		if anim_player.has_animation("idle"):
@@ -657,7 +767,7 @@ func _setup_animation_player() -> void:
 			anim_player.get_animation("block").loop_mode = Animation.LOOP_NONE
 		if anim_player.has_animation("dead"):
 			anim_player.get_animation("dead").loop_mode = Animation.LOOP_NONE
-		
+
 		anim_player.animation_finished.connect(_on_animation_finished)
 		anim_player.play("idle")
 

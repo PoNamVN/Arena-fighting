@@ -23,16 +23,16 @@ var _total_attacks_executed: int = 0
 
 func _ready() -> void:
 	_fixed_position = global_position
-	
+
 	# Find AnimationPlayer inside Visuals/CharacterModel
 	anim_player = find_child("AnimationPlayer", true, false) as AnimationPlayer
 	if anim_player and anim_player.has_animation("idle"):
 		anim_player.play("idle")
-		
+
 	# Find player target if not set
 	if not target:
 		target = _find_player()
-		
+
 	# Delay initial attack by ~1.0 second on spawn
 	if auto_attack:
 		_start_wait_cycle(1.0)
@@ -68,7 +68,7 @@ func _face_target() -> void:
 		target = _find_player()
 	if not target:
 		return
-		
+
 	var to_target: Vector3 = target.global_position - global_position
 	to_target.y = 0.0
 	if to_target.length_squared() > 0.0001:
@@ -82,10 +82,10 @@ func _face_target() -> void:
 func trigger_attack_now() -> bool:
 	if _is_attacking:
 		return false
-		
+
 	if _cycle_tween and _cycle_tween.is_valid():
 		_cycle_tween.kill()
-		
+
 	_execute_attack_sequence()
 	return true
 
@@ -103,7 +103,7 @@ func toggle_auto_attack() -> bool:
 func _start_wait_cycle(delay: float) -> void:
 	if _cycle_tween and _cycle_tween.is_valid():
 		_cycle_tween.kill()
-		
+
 	_cycle_tween = create_tween()
 	_cycle_tween.tween_interval(delay)
 	_cycle_tween.tween_callback(func() -> void:
@@ -115,20 +115,20 @@ func _start_wait_cycle(delay: float) -> void:
 func _execute_attack_sequence() -> void:
 	_is_attacking = true
 	_face_target()
-	
+
 	if anim_player and anim_player.has_animation("attack"):
 		anim_player.speed_scale = 1.0
 		anim_player.stop()
 		anim_player.play("attack", 0.05)
-		
+
 	if _cycle_tween and _cycle_tween.is_valid():
 		_cycle_tween.kill()
-		
+
 	_cycle_tween = create_tween()
 	# 1. Wind-up delay to attack impact apex
 	_cycle_tween.tween_interval(attack_windup)
 	_cycle_tween.tween_callback(_apply_attack_impact)
-	
+
 	# 2. Recovery time after impact
 	_cycle_tween.tween_interval(attack_recovery - attack_windup)
 	_cycle_tween.tween_callback(_finish_attack_sequence)
@@ -140,18 +140,18 @@ func _apply_attack_impact() -> void:
 		target = _find_player()
 	if not target:
 		return
-		
+
 	var to_target: Vector3 = target.global_position - global_position
 	to_target.y = 0.0
 	var dist: float = to_target.length()
-	
+
 	var dummy_fwd: Vector3 = -visuals.global_basis.z if visuals else -global_basis.z
 	dummy_fwd.y = 0.0
 	dummy_fwd = dummy_fwd.normalized()
-	
+
 	var to_target_dir: Vector3 = to_target.normalized() if dist > 0.0001 else dummy_fwd
 	var dot: float = dummy_fwd.dot(to_target_dir)
-	
+
 	# Check range (2.2m) and directional cone (within 120° frontal sector)
 	if dist <= attack_range and dot >= cos(deg_to_rad(60.0)):
 		if target.has_method("take_damage"):
@@ -162,7 +162,7 @@ func _finish_attack_sequence() -> void:
 	_is_attacking = false
 	if anim_player and anim_player.has_animation("idle"):
 		anim_player.play("idle", 0.15)
-		
+
 	if auto_attack:
 		_start_wait_cycle(attack_interval)
 

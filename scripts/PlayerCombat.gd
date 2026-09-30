@@ -24,6 +24,7 @@ signal hit_landed(target: Node, damage: float, was_blocked: bool)
 
 ## VFX Configuration
 @export var use_legacy_slash_cue: bool = false
+@export var hit_stop_duration: float = 0.0
 
 ## Internal State
 var _cooldown_timer: float = 0.0
@@ -84,11 +85,11 @@ func _perform_attack() -> void:
 	var world_3d: World3D = get_world_3d()
 	if not world_3d or not is_inside_tree():
 		return
-	
+
 	var space_state: PhysicsDirectSpaceState3D = world_3d.direct_space_state
 	if not space_state:
 		return
-	
+
 	# Determine attack direction based on player camera (FPS) or Visuals facing direction (TPS)
 	var forward_dir: Vector3 = Vector3.FORWARD
 	var origin_pos: Vector3 = Vector3.ZERO
@@ -104,42 +105,42 @@ func _perform_attack() -> void:
 	else:
 		forward_dir = -global_basis.z.normalized()
 		origin_pos = global_position + Vector3(0.0, 0.9, 0.0)
-	
+
 	_trigger_visual_cue(forward_dir)
-	
+
 	var attack_center: Vector3 = origin_pos + forward_dir * (attack_range * 0.5)
-	
+
 	var query: PhysicsShapeQueryParameters3D = PhysicsShapeQueryParameters3D.new()
 	query.shape = _cached_shape
 	query.transform = Transform3D(Basis.IDENTITY, attack_center)
 	query.collision_mask = target_collision_mask
 	query.collide_with_areas = false
 	query.collide_with_bodies = true
-	
+
 	if player:
 		query.exclude = [player.get_rid()]
-	
+
 	var hits: Array[Dictionary] = space_state.intersect_shape(query, 16)
 	if hits.is_empty():
 		return
-	
+
 	var damaged_targets: Array[Node] = []
-	
+
 	for hit in hits:
 		var collider: Object = hit.get("collider")
 		if not collider is Node:
 			continue
-		
+
 		var target_node: Node = collider as Node
 		if target_node == player or target_node == self or target_node.is_ancestor_of(self) or self.is_ancestor_of(target_node):
 			continue
-		
+
 		if target_node in damaged_targets:
 			continue
-		
+
 		if not target_node.has_method("take_damage"):
 			continue
-		
+
 		# Wall line-of-sight check: ensure no wall on Layer 1 is blocking between player and target
 		var target_pos: Vector3 = (target_node as Node3D).global_position + Vector3(0.0, 0.9, 0.0) if target_node is Node3D else origin_pos
 		var ray_query: PhysicsRayQueryParameters3D = PhysicsRayQueryParameters3D.create(
@@ -147,27 +148,27 @@ func _perform_attack() -> void:
 		)
 		ray_query.collide_with_areas = false
 		ray_query.collide_with_bodies = true
-		
+
 		var exclude_list: Array[RID] = []
 		if player:
 			exclude_list.append(player.get_rid())
 		if target_node is CollisionObject3D:
 			exclude_list.append((target_node as CollisionObject3D).get_rid())
 		ray_query.exclude = exclude_list
-		
+
 		var ray_result: Dictionary = space_state.intersect_ray(ray_query)
 		if not ray_result.is_empty():
 			# Blocked by wall
 			continue
-		
+
 		# Directional block check
 		var is_blocked: bool = false
 		var final_damage: float = attack_damage
-		
+
 		var target_is_blocking: bool = false
 		var target_block_reduction: float = 0.85
 		var block_cone: float = 120.0
-		
+
 		var target_is_broken: bool = false
 		if "is_shield_broken" in target_node:
 			target_is_broken = target_node.get("is_shield_broken")
@@ -179,19 +180,20 @@ func _perform_attack() -> void:
 				target_is_blocking = target_node.get("is_blocking")
 			elif target_node.has_method("is_blocking"):
 				target_is_blocking = target_node.call("is_blocking")
-				
+
 			if "block_damage_reduction" in target_node:
 				target_block_reduction = target_node.get("block_damage_reduction")
 			if "block_cone_deg" in target_node:
 				block_cone = target_node.get("block_cone_deg")
-				
+
 			if target_is_blocking and target_node is Node3D:
 				var attacker_pos: Vector3 = player.global_position if player else global_position
 				if is_attack_inside_block_cone(target_node as Node3D, attacker_pos, block_cone):
 					is_blocked = true
 					final_damage = attack_damage * (1.0 - target_block_reduction)
-		
-		target_node.call("take_damage", final_damage)
+
+		var attacker_pos: Vector3 = player.global_position if player else global_position
+		target_node.call("take_damage", final_damage, attacker_pos)
 		var target_broke_shield_now: bool = false
 		if is_blocked:
 			var prev_target_dur: float = target_node.get("shield_durability") if "shield_durability" in target_node else 100.0
@@ -202,10 +204,10 @@ func _perform_attack() -> void:
 			var new_target_dur: float = target_node.get("shield_durability") if "shield_durability" in target_node else 0.0
 			if prev_target_dur > 0.0 and new_target_dur <= 0.0:
 				target_broke_shield_now = true
-		
+
 		damaged_targets.append(target_node)
 		hit_landed.emit(target_node, final_damage, is_blocked)
-		
+
 		# VFX placement: Calculate contact point on target surface
 		var to_target: Vector3 = target_pos - origin_pos
 		var dist: float = to_target.length()
@@ -213,19 +215,20 @@ func _perform_attack() -> void:
 		if dist > 0.001:
 			hit_dir = to_target.normalized()
 		var contact_pos: Vector3 = target_pos - hit_dir * minf(0.35, dist * 0.5)
-		
+
 		if is_blocked:
 			_trigger_block_impact(contact_pos, hit_dir)
 			if target_broke_shield_now and not (target_node is PlayerController):
 				_trigger_shield_break(contact_pos, hit_dir)
 		else:
 			_trigger_hit_impact(contact_pos, hit_dir)
+			_trigger_hit_stop()
 
 
 
 func is_attack_inside_block_cone(defender: Node3D, attacker_pos: Vector3, block_cone_deg: float = 120.0) -> bool:
 	var defender_fwd: Vector3 = Vector3.FORWARD
-	
+
 	if defender is PlayerController:
 		var p: PlayerController = defender as PlayerController
 		if p.is_third_person and p.visuals:
@@ -238,26 +241,26 @@ func is_attack_inside_block_cone(defender: Node3D, attacker_pos: Vector3, block_
 		defender_fwd = -defender.get_node("Visuals").global_basis.z
 	else:
 		defender_fwd = -defender.global_basis.z
-		
+
 	defender_fwd.y = 0.0
 	defender_fwd = defender_fwd.normalized()
-	
+
 	var to_attacker: Vector3 = attacker_pos - defender.global_position
 	to_attacker.y = 0.0
 	if to_attacker.length_squared() < 0.0001:
 		return true
 	to_attacker = to_attacker.normalized()
-	
+
 	var dot: float = defender_fwd.dot(to_attacker)
 	var min_dot: float = cos(deg_to_rad(block_cone_deg * 0.5)) # cos(60°) = 0.50
-	
+
 	return dot >= min_dot
 
 
 func _trigger_visual_cue(attack_direction: Vector3 = Vector3.FORWARD) -> void:
 	var direction: Vector3 = attack_direction
 	direction.y = 0.0
-	
+
 	if direction.length_squared() < 0.0001:
 		if player:
 			var basis: Basis = player.visuals.global_basis if (player.is_third_person and player.visuals) else player.global_basis
@@ -265,11 +268,11 @@ func _trigger_visual_cue(attack_direction: Vector3 = Vector3.FORWARD) -> void:
 			direction.y = 0.0
 		else:
 			direction = Vector3.FORWARD
-			
+
 	direction = direction.normalized()
-	
+
 	var player_pos: Vector3 = player.global_position if player else global_position
-	
+
 	# 1. Trigger stylized SlashArcVFX
 	if slash_arc_vfx and slash_arc_vfx.has_method("trigger"):
 		slash_arc_vfx.trigger(direction, player_pos)
@@ -278,7 +281,7 @@ func _trigger_visual_cue(attack_direction: Vector3 = Vector3.FORWARD) -> void:
 		slash_arc_vfx.global_position.y = player_pos.y + 0.9
 		slash_arc_vfx.global_basis = Basis.looking_at(direction, Vector3.UP)
 		slash_arc_vfx.visible = true
-	
+
 	# 2. Legacy yellow BoxMesh: disabled by default once SlashArcVFX is active
 	if use_legacy_slash_cue and visual_slash_cue:
 		visual_slash_cue.global_position = player_pos + direction * 1.1
@@ -286,10 +289,10 @@ func _trigger_visual_cue(attack_direction: Vector3 = Vector3.FORWARD) -> void:
 		visual_slash_cue.global_basis = Basis.looking_at(direction, Vector3.UP)
 		visual_slash_cue.visible = true
 		visual_slash_cue.scale = Vector3(0.5, 0.5, 0.5)
-		
+
 		if _slash_tween and _slash_tween.is_valid():
 			_slash_tween.kill()
-			
+
 		_slash_tween = create_tween()
 		_slash_tween.tween_property(visual_slash_cue, "scale", Vector3(1.2, 1.2, 1.2), 0.12)
 		_slash_tween.tween_callback(func() -> void: if visual_slash_cue: visual_slash_cue.visible = false)
@@ -354,3 +357,9 @@ func stop_slash_effect() -> void:
 		shield_break_vfx.visible = false
 
 
+func _trigger_hit_stop() -> void:
+	# Per Section 6: Global pause breaks timers/shield recovery/VFX, while slowing
+	# AnimationPlayer speed_scale breaks strict attack timing (0.35s impact constraint).
+	# Safely skipped per design specification.
+	if player and player.anim_player:
+		player.anim_player.speed_scale = 1.0

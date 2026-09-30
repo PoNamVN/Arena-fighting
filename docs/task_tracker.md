@@ -179,4 +179,30 @@
       - Created 24-test acceptance test suite `run_task5_6_combat_test_arena_test.gd` (24/24 PASS).
       - Ran full 12-suite regression: Task 5.6A (24/24), Task 5.5 (18/18), Task 5.4 (15/15), Task 5.3 (10/10), Task 5.2 (10/10), Task 5.1 (10/10), RMB lifecycle (15/15), Phase 4 FSM (18/18), Phase 3 (10/10), Phase 2 (5/5), Phase 1 (4/4), Training Dummy (17/17) - ALL PASSED.
       - Confirmed zero Git commits or pushes executed.
-
+  - [x] **Task 5.7: Hit Reaction, Knockback & Combat Feel**:
+    - **Normal Hit Reaction**:
+      - Lightweight procedural recoil on both TrainingDummy (`_apply_dummy_reaction`) and PlayerController (`apply_hit_reaction`).
+      - Visual flinch with tilt (~12° unblocked, ~4° blocked) and spring-back tween lasting ~0.15s (`hit_reaction_duration`).
+      - In first-person mode, adds subtle pitch kick (`_cam_recoil_pitch`).
+      - Target automatically returns to baseline locomotion/combat state without interrupting the attacker or desynchronizing FSM.
+    - **Small Directional Knockback**:
+      - Horizontal XZ directional displacement (`hit_knockback_distance = 0.40m`, duration `0.10s`).
+      - Strictly zero vertical launch (`delta.y == 0.0`).
+      - Halted immediately upon expiration to eliminate friction overshoot; does not accumulate into infinite velocity when spammed.
+      - Disables FSM transition to RUN while knockback impulse is active.
+      - Zeroed on character death and respawn.
+    - **Block Defensive Recoil**:
+      - Added small defensive recoil (`block_recoil_distance = 0.08m`, duration `0.08s`) on successful frontal block.
+      - Preserves full player control over RMB block hold lifecycle, 85% damage reduction, and 15 shield durability damage.
+    - **Shield Break Stagger & Feedback**:
+      - Stronger stagger recoil impulse (0.45m over 0.12s) and 2.0x camera pitch feedback.
+      - Retains exact 1.0s stun, 2.0s recovery delay, RMB rejection while broken, and ShieldBreakVFX.
+    - **Hit-Stop Safety**:
+      - As permitted by Section 6, hit-stop is safely bypassed (`hit_stop_duration = 0.0`) to strictly avoid global pause locks (breaking timers/shield recovery/VFX) or animation scaling desynchronization (breaking the strict 0.35s impact timing constraint).
+    - **Miss & Death Priorities**:
+      - Misses and out-of-range attacks trigger zero hit reactions and zero knockback.
+      - Death takes terminal priority over hit reactions; disables knockback and cancels active impulses.
+    - **Acceptance & Regression Testing**:
+      - Created dedicated 22-test acceptance suite `run_task5_7_hit_reaction_test.gd` (22/22 PASS).
+      - Full 13-suite regression: 168 / 168 tests passed (0 failures).
+      - Strictly zero Git commits or pushes executed.
