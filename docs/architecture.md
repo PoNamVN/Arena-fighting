@@ -37,11 +37,28 @@ res://
 - Centralized `StateMachine` node with dedicated state child scripts (e.g. `IdleState.gd`, `MoveState.gd`, `AttackState.gd`, `HurtState.gd`).
 - Clean separation of concern: each state only handles its own inputs and animation transitions.
 
+### D. Combat Feedback Architecture
+- `CombatFeedback` node coordinates the feedback pipeline, including hit reaction, camera recoil, VFX, damage numbers, attack telegraph, and audio hooks.
+
+```mermaid
+stateDiagram-v2
+    [*] --> IDLE
+    IDLE --> RUN : move
+    RUN --> ATTACK : attack input
+    ATTACK --> BLOCK : block input
+    BLOCK --> RUN : release block
+    ATTACK --> DEAD : death
+    BLOCK --> DEAD : death
+    RUN --> DEAD : death
+    DEAD --> [*]
+```
+
 ### C. Blender MCP Pipeline
 - Live Blender driving via `mcp-for-blender`.
 - Geometry authored with low triangle budget (< 3000 tris).
 - Pivot/Origin enforced at ground contact.
 - Export destination: `D:/Game 3D/Game_3D/assets/models/<name>.glb`.
+  - Note: Some VFX such as `SlashArcVFX` and `AttackTelegraphVFX` are generated at runtime as procedural meshes.
 
 ---
 
@@ -53,9 +70,19 @@ res://
   ```
 
 ---
+- Integration/testing scene: `CombatTestArena.tscn` demonstrates the current combat prototype.
 
 ## 4. Architectural Items To Be Determined (TBD)
-- **Input Map Scheme [TBD]**: Action names and default bindings.
+- **Input Map** is defined in `project.godot`. The following actions are implemented:
+  - `move_forward`
+  - `move_backward`
+  - `move_left`
+  - `move_right`
+  - `jump`
+  - `sprint`
+  - `attack`
+  - `block`
+  - `ui_cancel`
 - **Damage Formula & Armor [TBD]**: Flat reduction vs percentage mitigation.
 - **Animation Framework [TBD]**: AnimationTree state machine vs code-driven procedural animations / tweening.
-- **Audio System [TBD]**: Bus layout and 3D positional audio setup.
+- **Audio System**: Audio hooks/signals exist in `CombatFeedback`. A full production audio system and assets are not implemented.
