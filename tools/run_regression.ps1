@@ -3,7 +3,7 @@ $godot = 'D:\Game\godot_editor\Godot_v4.3-stable_win64_console.exe'
 $project = 'D:\Game 3D\Game_3D'
 $outputRoot = Join-Path $PSScriptRoot 'regression_output'
 New-Item -ItemType Directory -Force -Path $outputRoot | Out-Null
-$suites = @('run_phase1_runtime_test.gd','run_phase2_runtime_test.gd','run_phase3_runtime_test.gd','run_phase4_fsm_runtime_test.gd','run_rmb_lifecycle_test.gd','run_task5_1_slash_arc_test.gd','run_task5_2_hit_impact_test.gd','run_task5_3_block_impact_test.gd','run_task5_4_shield_durability_test.gd','run_task5_5_shield_break_test.gd','run_task5_6_combat_test_arena_test.gd','run_task5_7_hit_reaction_test.gd','run_task5_8_combat_feedback_test.gd','run_task5_9_attack_telegraph_test.gd','run_task5_10_shield_lifecycle_test.gd','run_task5_11_combat_feedback_test.gd','run_task5_12_shift_lock_test.gd','run_training_dummy_test.gd','run_visual_slash_cue_test.gd','run_task5_14_attack_combo_test.gd','run_task5_14a_combo_buffer_test.gd','run_task5_14c_combo_finisher_recovery_test.gd')
+$suites = @('run_phase1_runtime_test.gd','run_phase2_runtime_test.gd','run_phase3_runtime_test.gd','run_phase4_fsm_runtime_test.gd','run_rmb_lifecycle_test.gd','run_task5_1_slash_arc_test.gd','run_task5_2_hit_impact_test.gd','run_task5_3_block_impact_test.gd','run_task5_4_shield_durability_test.gd','run_task5_5_shield_break_test.gd','run_task5_6_combat_test_arena_test.gd','run_task5_7_hit_reaction_test.gd','run_task5_8_combat_feedback_test.gd','run_task5_9_attack_telegraph_test.gd','run_task5_10_shield_lifecycle_test.gd','run_task5_11_combat_feedback_test.gd','run_task5_12_shift_lock_test.gd','run_training_dummy_test.gd','run_visual_slash_cue_test.gd','run_task5_14_attack_combo_test.gd','run_task5_14a_combo_buffer_test.gd','run_task5_14c_combo_finisher_recovery_test.gd','run_task5_14d_manual_combo_test.gd','run_task5_15a_foundation_test.gd','run_task5_15b_dodge_test.gd','run_task5_15c_perfect_dodge_test.gd','run_task5_15d_stamina_test.gd','run_task5_15e_ability_system_test.gd','run_task5_15f_combat_integration_test.gd')
 $known = @{
  'run_task5_5_shield_break_test.gd'=@('TEST 17')
  'run_rmb_lifecycle_test.gd'=@('STEP 10','STEP 12','STEP 13','STEP 14','STEP 15')
@@ -36,5 +36,5 @@ foreach($suite in $suites) {
  $executionError=($exit -ne 0 -and $fails -eq 0);$status=if($new.Count -gt 0 -or $mismatch -or $executionError){'FAIL'}elseif($old.Count -gt 0){'KNOWN'}else{'PASS'}
  $rows += [PSCustomObject]@{Suite=$suite;Status=$status;Pass=$pass;Fail=$fails;Exit=$exit;Summary=if($null -ne $sumTotal){"$sumPass/$sumTotal"}else{'NONE'};Mismatch=$mismatch;Known=($old -join ' | ');New=($new -join ' | ')}
 }
-Write-Host "`nREGRESSION REPORT (22 SUITES)";$rows|Format-Table Suite,Status,Pass,Fail,Exit,Summary,Mismatch,Known,New -AutoSize
+Write-Host "`nREGRESSION REPORT ($($suites.Count) SUITES)";$rows|Format-Table Suite,Status,Pass,Fail,Exit,Summary,Mismatch,Known,New -AutoSize
 if(@($rows|Where-Object{$_.Status -eq 'FAIL'}).Count -gt 0){exit 1}else{exit 0}

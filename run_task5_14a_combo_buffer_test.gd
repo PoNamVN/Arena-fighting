@@ -85,7 +85,7 @@ func _run_tests() -> void:
 	await process_frame
 
 	# -----------------------------------------------------------------
-	# TEST 2: Rapid human LMB clicks (0ms, 100ms, 200ms) produce full 3-hit combo
+	# TEST 2: Rapid human LMB clicks during windup do not buffer combo
 	# -----------------------------------------------------------------
 	td.reset_dummy()
 	td.is_blocking = false
@@ -125,12 +125,12 @@ func _run_tests() -> void:
 
 	await _wait_for_player_attack_finish(p)
 	var dmg_t2: float = 100.0 - td.health_component.current_health
-	var t2_pass: bool = (step_after_c1 == 1) and (buf_after_c1 == 0) and (buf_after_c2 == 1) and (buf_after_c3 == 2) and (max_step_t2 == 3) and (dmg_t2 == 75.0) and (p.combat_state == PlayerController.CombatState.IDLE)
-	_record_result("TEST 2: Rapid human LMB clicks produce full 3-hit combo", t2_pass,
-		"Buffer: %d->%d->%d, Max step: %d, Damage: %.1f (Expected 75.0)" % [buf_after_c1, buf_after_c2, buf_after_c3, max_step_t2, dmg_t2])
+	var t2_pass: bool = (step_after_c1 == 1) and (buf_after_c1 == 0) and (buf_after_c2 == 0) and (buf_after_c3 == 0) and (max_step_t2 == 1) and (dmg_t2 == 25.0) and (p.combat_state == PlayerController.CombatState.IDLE)
+	_record_result("TEST 2: Rapid human LMB clicks during windup do not buffer combo", t2_pass,
+		"Buffer: %d->%d->%d, Max step: %d, Damage: %.1f (Expected 25.0)" % [buf_after_c1, buf_after_c2, buf_after_c3, max_step_t2, dmg_t2])
 
 	# -----------------------------------------------------------------
-	# TEST 3: Spam 10 rapid clicks caps at max 3 combo attacks
+	# TEST 3: Spam 10 rapid clicks during windup are ignored without buffering
 	# -----------------------------------------------------------------
 	td.reset_dummy()
 	td.is_blocking = false
@@ -157,9 +157,9 @@ func _run_tests() -> void:
 
 	await _wait_for_player_attack_finish(p)
 	var dmg_t3: float = 100.0 - td.health_component.current_health
-	var t3_pass: bool = (max_step_t3 == 3) and (dmg_t3 == 75.0) and (p.combat_state == PlayerController.CombatState.IDLE)
-	_record_result("TEST 3: Spam 10 rapid clicks caps at max 3 combo attacks", t3_pass,
-		"Max step seen: %d, Damage: %.1f (Expected 75.0 / exactly 3 hits)" % [max_step_t3, dmg_t3])
+	var t3_pass: bool = (max_step_t3 == 1) and (dmg_t3 == 25.0) and (p.combat_state == PlayerController.CombatState.IDLE)
+	_record_result("TEST 3: Spam 10 rapid clicks during windup are ignored without buffering", t3_pass,
+		"Max step seen: %d, Damage: %.1f (Expected 25.0 / single hit)" % [max_step_t3, dmg_t3])
 
 	# -----------------------------------------------------------------
 	# TEST 4: Single click produces only 1 attack (damage 25.0)
@@ -180,7 +180,7 @@ func _run_tests() -> void:
 		"Damage: %.1f (Expected 25.0), Final state: %s" % [dmg_t4, p.combat_state])
 
 	# -----------------------------------------------------------------
-	# TEST 5: Rapid 2 clicks produces exactly 2 attacks (damage 50.0)
+	# TEST 5: Rapid 2 clicks during windup ignores second click
 	# -----------------------------------------------------------------
 	td.reset_dummy()
 	td.is_blocking = false
@@ -206,9 +206,9 @@ func _run_tests() -> void:
 
 	await _wait_for_player_attack_finish(p)
 	var dmg_t5: float = 100.0 - td.health_component.current_health
-	var t5_pass: bool = (max_step_t5 == 2) and (dmg_t5 == 50.0) and (p.combat_state == PlayerController.CombatState.IDLE)
-	_record_result("TEST 5: Rapid 2 clicks produces exactly 2 attacks", t5_pass,
-		"Max step seen: %d, Damage: %.1f (Expected 50.0)" % [max_step_t5, dmg_t5])
+	var t5_pass: bool = (max_step_t5 == 1) and (dmg_t5 == 25.0) and (p.combat_state == PlayerController.CombatState.IDLE)
+	_record_result("TEST 5: Rapid 2 clicks during windup ignores second click", t5_pass,
+		"Max step seen: %d, Damage: %.1f (Expected 25.0)" % [max_step_t5, dmg_t5])
 
 	# -----------------------------------------------------------------
 	# TEST 6: Timed combo clicks still work identically
@@ -276,13 +276,13 @@ func _run_tests() -> void:
 		"In recovery: step=%d (timer > 0: %s), After timeout: step=%d" % [step_in_rec, in_rec_timer, step_after_rec])
 
 	# -----------------------------------------------------------------
-	# TEST 8: Death interrupts combo and clears buffer
+	# TEST 8: Death interrupts combo and clears state
 	# -----------------------------------------------------------------
 	p.reset_combo()
 	await _wait_for_player_attack_finish(p)
 	await process_frame
 
-	# Start attack and buffer 2 clicks
+	# Start attack
 	_send_lmb(true)
 	await process_frame
 	_send_lmb(false)
@@ -292,7 +292,6 @@ func _run_tests() -> void:
 	_send_lmb(true)
 	await process_frame
 	_send_lmb(false)
-	var buf_before_death: int = p.combo_buffer
 
 	# Die mid-combo
 	p.transition_to(PlayerController.CombatState.DEAD)
@@ -303,12 +302,12 @@ func _run_tests() -> void:
 	p.respawn(Vector3(3.5, 0, 1.8), 0.0)
 	await process_frame
 
-	var t8_pass: bool = (buf_before_death == 2) and is_dead_state and (buf_after_death == 0) and (step_after_death == 0)
-	_record_result("TEST 8: Death interrupts combo and clears buffer", t8_pass,
-		"Buffer before death: %d, after death: %d, step: %d" % [buf_before_death, buf_after_death, step_after_death])
+	var t8_pass: bool = is_dead_state and (buf_after_death == 0) and (step_after_death == 0)
+	_record_result("TEST 8: Death interrupts combo and clears state", t8_pass,
+		"Buffer after death: %d, step: %d" % [buf_after_death, step_after_death])
 
 	# -----------------------------------------------------------------
-	# TEST 9: Hit reaction clears combo buffer
+	# TEST 9: Hit reaction clears combo state
 	# -----------------------------------------------------------------
 	p.reset_combo()
 	await _wait_for_player_attack_finish(p)
@@ -317,10 +316,6 @@ func _run_tests() -> void:
 	_send_lmb(true)
 	await process_frame
 	_send_lmb(false)
-	_send_lmb(true)
-	await process_frame
-	_send_lmb(false)
-	var buf_before_hit: int = p.combo_buffer
 
 	# Player receives a hit reaction
 	p.apply_hit_reaction(Vector3.BACK, false)
@@ -328,12 +323,12 @@ func _run_tests() -> void:
 	var step_after_hit: int = p.combo_step
 	await _wait_for_player_attack_finish(p)
 
-	var t9_pass: bool = (buf_before_hit >= 1) and (buf_after_hit == 0) and (step_after_hit == 0)
-	_record_result("TEST 9: Hit reaction clears combo buffer", t9_pass,
-		"Buffer before hit: %d, after hit: %d, step: %d" % [buf_before_hit, buf_after_hit, step_after_hit])
+	var t9_pass: bool = (buf_after_hit == 0) and (step_after_hit == 0)
+	_record_result("TEST 9: Hit reaction clears combo state", t9_pass,
+		"Buffer after hit: %d, step: %d" % [buf_after_hit, step_after_hit])
 
 	# -----------------------------------------------------------------
-	# TEST 10: Shield break clears combo buffer
+	# TEST 10: Shield break clears combo state
 	# -----------------------------------------------------------------
 	p.reset_combo()
 	await _wait_for_player_attack_finish(p)
@@ -342,10 +337,6 @@ func _run_tests() -> void:
 	_send_lmb(true)
 	await process_frame
 	_send_lmb(false)
-	_send_lmb(true)
-	await process_frame
-	_send_lmb(false)
-	var buf_before_break: int = p.combo_buffer
 
 	p.break_shield()
 	var buf_after_break: int = p.combo_buffer
@@ -353,9 +344,9 @@ func _run_tests() -> void:
 	p.reset_shield_for_new_round()
 	await process_frame
 
-	var t10_pass: bool = (buf_before_break >= 1) and (buf_after_break == 0) and (step_after_break == 0)
-	_record_result("TEST 10: Shield break clears combo buffer", t10_pass,
-		"Buffer before break: %d, after break: %d, step: %d" % [buf_before_break, buf_after_break, step_after_break])
+	var t10_pass: bool = (buf_after_break == 0) and (step_after_break == 0)
+	_record_result("TEST 10: Shield break clears combo state", t10_pass,
+		"Buffer after break: %d, step: %d" % [buf_after_break, step_after_break])
 
 	# -----------------------------------------------------------------
 	# TEST 11: Block during combo rejects mid-swing block; manual reset works
@@ -383,7 +374,7 @@ func _run_tests() -> void:
 		"Mid-swing block rejected: %s, Block after: %s, Buffer on block: %d" % [not block_mid_swing, block_after, buf_on_block])
 
 	# -----------------------------------------------------------------
-	# TEST 12: Shield durability & break logic intact during buffered combo
+	# TEST 12: Shield durability & break logic intact during manual combo
 	# -----------------------------------------------------------------
 	td.reset_dummy()
 	td.rotation.y = PI
@@ -393,15 +384,26 @@ func _run_tests() -> void:
 	await _wait_for_player_attack_finish(p)
 	await process_frame
 
-	# Rapid 3 clicks into blocking dummy
+	# Timed 3 clicks into blocking dummy
 	_send_lmb(true)
 	await process_frame
 	_send_lmb(false)
-	for i in range(6): await process_frame
+
+	var ap_t12: AnimationPlayer = p.anim_player
+	var w1_t12: int = 150
+	while ap_t12.current_animation_position < 0.40 and p.combat_state == PlayerController.CombatState.ATTACK and w1_t12 > 0:
+		await process_frame
+		w1_t12 -= 1
+
 	_send_lmb(true)
 	await process_frame
 	_send_lmb(false)
-	for i in range(6): await process_frame
+
+	var w2_t12: int = 150
+	while (p.combo_step < 2 or ap_t12.current_animation_position < 0.40) and p.combat_state == PlayerController.CombatState.ATTACK and w2_t12 > 0:
+		await process_frame
+		w2_t12 -= 1
+
 	_send_lmb(true)
 	await process_frame
 	_send_lmb(false)
@@ -410,11 +412,11 @@ func _run_tests() -> void:
 	var final_shield: float = td.shield_durability
 	var broken: bool = td.is_shield_broken
 	var t12_pass: bool = (final_shield == 0.0) and broken
-	_record_result("TEST 12: Shield durability & break logic intact during buffered combo", t12_pass,
+	_record_result("TEST 12: Shield durability & break logic intact during manual combo", t12_pass,
 		"Final shield durability: %.1f, Is shield broken: %s" % [final_shield, broken])
 
 	# -----------------------------------------------------------------
-	# TEST 13: FPS mode supports buffered 3-hit combo identically
+	# TEST 13: FPS mode supports manual 3-hit combo identically
 	# -----------------------------------------------------------------
 	td.reset_dummy()
 	td.is_blocking = false
@@ -429,11 +431,22 @@ func _run_tests() -> void:
 	_send_lmb(true)
 	await process_frame
 	_send_lmb(false)
-	for i in range(6): await process_frame
+
+	var ap_t13: AnimationPlayer = p.anim_player
+	var w1_t13: int = 150
+	while ap_t13.current_animation_position < 0.40 and p.combat_state == PlayerController.CombatState.ATTACK and w1_t13 > 0:
+		await process_frame
+		w1_t13 -= 1
+
 	_send_lmb(true)
 	await process_frame
 	_send_lmb(false)
-	for i in range(6): await process_frame
+
+	var w2_t13: int = 150
+	while (p.combo_step < 2 or ap_t13.current_animation_position < 0.40) and p.combat_state == PlayerController.CombatState.ATTACK and w2_t13 > 0:
+		await process_frame
+		w2_t13 -= 1
+
 	_send_lmb(true)
 	await process_frame
 	_send_lmb(false)
@@ -444,7 +457,7 @@ func _run_tests() -> void:
 	await process_frame
 
 	var t13_pass: bool = (fps_dmg == 75.0) and (p.combat_state == PlayerController.CombatState.IDLE)
-	_record_result("TEST 13: FPS mode supports buffered 3-hit combo identically", t13_pass,
+	_record_result("TEST 13: FPS mode supports manual 3-hit combo identically", t13_pass,
 		"FPS combo total damage: %.1f (Expected 75.0)" % fps_dmg)
 
 	# -----------------------------------------------------------------

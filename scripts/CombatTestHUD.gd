@@ -7,6 +7,9 @@ extends CanvasLayer
 @onready var hp_label: Label = get_node_or_null("RootControl/StatsPanel/VBoxContainer/HPContainer/HPLabel") as Label
 @onready var shield_bar: ProgressBar = get_node_or_null("RootControl/StatsPanel/VBoxContainer/ShieldContainer/ShieldProgressBar") as ProgressBar
 @onready var shield_label: Label = get_node_or_null("RootControl/StatsPanel/VBoxContainer/ShieldContainer/ShieldLabel") as Label
+@onready var stamina_bar: ProgressBar = get_node_or_null("RootControl/StatsPanel/VBoxContainer/StaminaContainer/StaminaProgressBar") as ProgressBar
+@onready var stamina_label: Label = get_node_or_null("RootControl/StatsPanel/VBoxContainer/StaminaContainer/StaminaLabel") as Label
+@onready var abilities_label: Label = get_node_or_null("RootControl/StatsPanel/VBoxContainer/AbilitiesContainer/AbilitiesLabel") as Label
 @onready var status_label: Label = get_node_or_null("RootControl/StatsPanel/VBoxContainer/StatusContainer/StatusLabel") as Label
 @onready var low_shield_warning: Label = get_node_or_null("RootControl/StatsPanel/VBoxContainer/StatusContainer/LowShieldWarning") as Label
 @onready var break_banner: Label = get_node_or_null("RootControl/BreakBanner") as Label
@@ -59,6 +62,11 @@ func _setup_player_connections(p: PlayerController) -> void:
 		if not p.health_component.died.is_connected(_on_player_died):
 			p.health_component.died.connect(_on_player_died)
 
+	if "stamina_component" in p and p.stamina_component:
+		if not p.stamina_component.stamina_changed.is_connected(_on_stamina_changed):
+			p.stamina_component.stamina_changed.connect(_on_stamina_changed)
+		_on_stamina_changed(p.stamina_component.current_stamina, p.stamina_component.max_stamina)
+
 	# Initial UI refresh
 	if p.health_component:
 		_on_health_changed(p.health_component.current_health, p.health_component.max_health)
@@ -81,6 +89,30 @@ func _process(_delta: float) -> void:
 	else:
 		status_label.text = "READY"
 		status_label.modulate = Color(0.3, 0.9, 1.0, 1.0) # Bright cyan
+
+	# Update abilities cooldown and ultimate readiness
+	if abilities_label and "ability_system" in player and player.ability_system:
+		var sys: AbilitySystem = player.ability_system
+		var cd1: float = sys.get_cooldown_remaining("skill_1")
+		var cd2: float = sys.get_cooldown_remaining("skill_2")
+		var cd3: float = sys.get_cooldown_remaining("skill_3")
+		var s1_str: String = "Z: %.1fs" % cd1 if cd1 > 0.0 else "Z: READY"
+		var s2_str: String = "X: %.1fs" % cd2 if cd2 > 0.0 else "X: READY"
+		var s3_str: String = "C: %.1fs" % cd3 if cd3 > 0.0 else "C: READY"
+
+		var ult_ready: bool = player.stamina_component != null and player.stamina_component.is_full()
+		var ult_pct: int = roundi((player.stamina_component.get_stamina_ratio() * 100.0) if player.stamina_component else 0.0)
+		var ult_str: String = "V: [100% READY]" if ult_ready else "V: [%d%%]" % ult_pct
+
+		abilities_label.text = "%s | %s | %s\n%s" % [s1_str, s2_str, s3_str, ult_str]
+
+
+func _on_stamina_changed(current: float, maximum: float) -> void:
+	if stamina_bar:
+		stamina_bar.max_value = maximum
+		stamina_bar.value = current
+	if stamina_label:
+		stamina_label.text = "STAMINA: %d / %d" % [roundi(current), roundi(maximum)]
 
 
 func _on_health_changed(current: float, maximum: float) -> void:

@@ -130,9 +130,9 @@ func _run_tests() -> void:
 	var total_dmg_c2: float = 100.0 - hp_after_c2
 	await _wait_for_player_attack_finish(p)
 
-	var t3_pass: bool = in_window_c1 and queued_c2 and is_queued_c2 and (step_c2 == 2) and (state_c2 == PlayerController.CombatState.ATTACK) and (total_dmg_c2 == 50.0)
+	var t3_pass: bool = in_window_c1 and queued_c2 and (step_c2 == 2) and (state_c2 == PlayerController.CombatState.ATTACK) and (total_dmg_c2 == 50.0)
 	_record_result("TEST 3: Attack 1 -> Attack 2 works", t3_pass,
-		"In window: %s, Queued: %s, Step reached: %d, Total Damage: %.1f (Expected 50.0)" % [in_window_c1, queued_c2, step_c2, total_dmg_c2])
+		"In window: %s, Advanced: %s, Step reached: %d, Total Damage: %.1f (Expected 50.0)" % [in_window_c1, queued_c2, step_c2, total_dmg_c2])
 
 	# -----------------------------------------------------------------
 	# TEST 4: Attack 1 -> Attack 2 -> Attack 3 works (Full 3-Hit Combo)
@@ -194,10 +194,10 @@ func _run_tests() -> void:
 	await _wait_for_player_attack_finish(p)
 	var hp_early: float = td.health_component.current_health
 
-	# Early press before window is buffered; Attack 2 plays after Attack 1 (2 hits = 50 damage)
-	var t5_pass: bool = (not in_window_early) and early_press_accepted and queued_early and (hp_early == 50.0)
-	_record_result("TEST 5: Early input is buffered into combo", t5_pass,
-		"In window at early windup: %s, Press accepted: %s, Damage: %.1f (Expected 2 hits: 50.0)" % [in_window_early, early_press_accepted, 100.0 - hp_early])
+	# Early press before window is ignored; only Attack 1 plays (1 hit = 25 damage)
+	var t5_pass: bool = (not in_window_early) and (not early_press_accepted) and (not queued_early) and (hp_early == 75.0)
+	_record_result("TEST 5: Early input is ignored and not buffered into combo", t5_pass,
+		"In window at early windup: %s, Press accepted: %s, Damage: %.1f (Expected 1 hit: 25.0)" % [in_window_early, early_press_accepted, 100.0 - hp_early])
 
 	# -----------------------------------------------------------------
 	# TEST 6: Spam input cannot exceed 3 attacks (Max combo length = 3)

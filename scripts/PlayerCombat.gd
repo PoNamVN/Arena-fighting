@@ -249,6 +249,10 @@ func _perform_attack() -> void:
 		damaged_targets.append(target_node)
 		hit_landed.emit(target_node, final_damage, is_blocked)
 
+		# Generate stamina on successful basic attack hit (once per attack swing)
+		if damaged_targets.size() == 1 and player and "stamina_component" in player and player.stamina_component:
+			player.stamina_component.add_stamina(player.stamina_component.attack_stamina_gain)
+
 		# VFX placement: Calculate contact point on target surface
 		var to_target: Vector3 = target_pos - origin_pos
 		var dist: float = to_target.length()

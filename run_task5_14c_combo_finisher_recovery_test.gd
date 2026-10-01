@@ -111,11 +111,7 @@ func _run_tests() -> void:
 	_record("TEST 6: Two-hit combo has no finisher pause", player.combo_finisher_recovery_remaining <= 0.0)
 
 	await _reset(player, dummy)
-	player._try_combat_attack()
-	for i in range(10):
-		player._try_combat_attack()
-		await process_frame
-	await _wait_for_attack_finish(player)
+	await _start_combo(player, 3)
 	var damage_after_spam: float = 100.0 - dummy.health_component.current_health
 	var chained_during_pause: bool = player._try_combat_attack()
 	await _wait_for_finisher_recovery(player)

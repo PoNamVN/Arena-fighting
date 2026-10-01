@@ -24,6 +24,8 @@ func _ready() -> void:
 		_player_spawn_pos = player.global_position
 		_player_spawn_yaw = player._camera_yaw
 		player.shield_recovery_mode = PlayerController.ShieldRecoveryMode.TEST_ARENA
+		if player.stamina_component:
+			player.stamina_component.current_stamina = 100.0
 		if player.health_component:
 			player.health_component.died.connect(_on_player_died)
 			
@@ -46,6 +48,8 @@ func respawn_player() -> void:
 		
 	_respawn_count += 1
 	player.respawn(_player_spawn_pos, _player_spawn_yaw)
+	if player.stamina_component:
+		player.stamina_component.current_stamina = 100.0
 	
 	if hud:
 		hud.on_player_respawned()

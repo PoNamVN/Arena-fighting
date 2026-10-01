@@ -1,6 +1,9 @@
 class_name PlayerController
 extends CharacterBody3D
 
+# Store previous global position for shield charge impact correction
+var _last_global_position: Vector3 = Vector3.ZERO
+
 ## Combat FSM
 enum CombatState {
 	IDLE,
@@ -8,7 +11,8 @@ enum CombatState {
 	ATTACK,
 	BLOCK,
 	DEAD,
-	DODGE
+	DODGE,
+	COUNTER
 }
 
 signal state_changed(old_state: CombatState, new_state: CombatState)
@@ -40,6 +44,17 @@ signal state_changed(old_state: CombatState, new_state: CombatState)
 @export var shield_break_stun_duration: float = 1.0
 @export var shield_recovery_delay: float = 2.0
 var shield_durability: float = 100.0
+
+@export_group("Counter Attack")
+@export var counter_attack_damage: float = 50.0
+@export var counter_lunge_duration: float = 0.20
+@export var counter_arrival_distance: float = 1.2
+
+var _counter_target: Node3D = null
+var _counter_timer: float = 0.0
+var _counter_lunge_total_time: float = 0.20
+var _counter_strike_executed: bool = false
+var _counter_recovery_timer: float = 0.0
 
 ## Task 5.7: Hit Reaction, Knockback & Combat Feel Tuning
 @export var hit_reaction_duration: float = 0.15
@@ -102,7 +117,26 @@ signal hit_reacted(is_blocked: bool, hit_dir: Vector3)
 @onready var combat_feedback: CombatFeedback = get_node_or_null("CombatFeedback") as CombatFeedback
 @onready var stamina_component: StaminaComponent = get_node_or_null("StaminaComponent") as StaminaComponent
 @onready var dodge_controller: DodgeController = get_node_or_null("DodgeController") as DodgeController
-@onready var ability_system: AbilitySystem = get_node_or_null("AbilitySystem") as AbilitySystem
+var ability_system: AbilitySystem:
+	get:
+		if not _ability_system:
+			_ability_system = get_node_or_null("AbilitySystem") as AbilitySystem
+		return _ability_system
+	set(value):
+		_ability_system = value
+var _ability_system: AbilitySystem = null
+var active_ability_action: AbilityAction = null
+
+signal ability_action_started(slot_name: String, ability: AbilityData)
+signal ability_action_finished(slot_name: String)
+
+@export var hero_profile: String = "knight"
+var is_shield_enlarged: bool = false
+var _giant_shield_visual: Node3D = null
+var _shield_visual_tween: Tween = null
+var _shield_bone_idx: int = -1
+@export var steering_turn_rate: float = 7.0 # rad/s (~400 deg/s)
+
 var anim_player: AnimationPlayer = null
 var _skeleton: Skeleton3D = null
 var _head_bone_idx: int = -1
@@ -148,6 +182,10 @@ var combo_finisher_recovery_remaining: float:
 var is_attacking: bool:
 	get:
 		return combat_state == CombatState.ATTACK
+
+var is_countering: bool:
+	get:
+		return combat_state == CombatState.COUNTER
 
 var _is_attacking: bool:
 	get:
@@ -210,6 +248,13 @@ func _ready() -> void:
 		ability_system.name = "AbilitySystem"
 		add_child(ability_system)
 	ability_system.stamina_component = stamina_component
+	if hero_profile == "knight":
+		equip_knight_loadout()
+
+
+func equip_knight_loadout() -> void:
+	if ability_system:
+		KnightAbilities.equip_knight_loadout(ability_system)
 
 
 
@@ -259,6 +304,12 @@ func _unhandled_input(event: InputEvent) -> void:
 
 	# Combat Input Actions (Single source of truth via InputMap)
 	if event.is_action_pressed("attack") and not event.is_echo():
+		if is_counter_window_active():
+			if try_counter_attack(true):
+				return
+			else:
+				# If no valid target exists, LMB does nothing and must not start Counter.
+				return
 		_try_combat_attack()
 	elif event.is_action_pressed("block"):
 		if not is_shield_broken:
@@ -303,6 +354,67 @@ func _physics_process(delta: float) -> void:
 		move_and_slide()
 		if visuals and dodge_controller and dodge_controller.world_direction.length_squared() > 0.01:
 			visuals.rotation.y = atan2(-dodge_controller.world_direction.x, -dodge_controller.world_direction.z)
+		return
+
+	# COUNTER state: fast lunge towards target using move_and_slide(), then strike on arrival
+	if combat_state == CombatState.COUNTER:
+		if not is_on_floor():
+			velocity.y -= gravity * delta
+		else:
+			velocity.y = -0.1
+
+		if not _counter_strike_executed:
+			_counter_timer += delta
+			if is_instance_valid(_counter_target):
+				var to_target: Vector3 = _counter_target.global_position - global_position
+				to_target.y = 0.0
+				var dist: float = to_target.length()
+				var desired_stop_dist: float = counter_arrival_distance
+				var remaining_dist: float = maxf(0.0, dist - desired_stop_dist)
+
+				if dist > 0.001:
+					var face_dir: Vector3 = to_target.normalized()
+					var look_yaw: float = atan2(-face_dir.x, -face_dir.z)
+					if visuals:
+						visuals.rotation.y = look_yaw
+					_camera_yaw = look_yaw
+
+					var time_left: float = maxf(0.001, _counter_lunge_total_time - _counter_timer)
+					var lunge_speed: float = remaining_dist / time_left
+					var horiz_vel: Vector3 = face_dir * lunge_speed
+					velocity.x = horiz_vel.x
+					velocity.z = horiz_vel.z
+				else:
+					velocity.x = 0.0
+					velocity.z = 0.0
+			else:
+				velocity.x = 0.0
+				velocity.z = 0.0
+
+			move_and_slide()
+
+			var is_arrived: bool = _counter_timer >= _counter_lunge_total_time
+			if is_instance_valid(_counter_target):
+				var curr_dist: float = (Vector3(_counter_target.global_position.x, 0, _counter_target.global_position.z) - Vector3(global_position.x, 0, global_position.z)).length()
+				if curr_dist <= counter_arrival_distance + 0.15:
+					is_arrived = true
+
+			if is_arrived:
+				velocity.x = 0.0
+				velocity.z = 0.0
+				_execute_counter_strike()
+		else:
+			velocity.x = 0.0
+			velocity.z = 0.0
+			move_and_slide()
+			_counter_recovery_timer -= delta
+			if _counter_recovery_timer <= 0.0:
+				_finish_counter_attack()
+		return
+
+	# SHIELD CHARGE (Ability Z) movement & steering
+	if active_ability_action and active_ability_action.is_active() and active_ability_action.data and active_ability_action.data.id == "shield_charge":
+		_process_shield_charge(delta)
 		return
 
 	# Shield break timers
@@ -357,6 +469,10 @@ func _physics_process(delta: float) -> void:
 			velocity.x = 0.0
 			velocity.z = 0.0
 	else:
+		if active_ability_action and active_ability_action.is_active():
+			active_ability_action.update(delta)
+			if not active_ability_action.allows_movement():
+				target_horizontal = Vector3.ZERO
 		var current_horizontal: Vector3 = Vector3(velocity.x, 0.0, velocity.z)
 		var lerp_rate: float = acceleration if move_dir.length_squared() > 0.001 else friction
 		var new_horizontal: Vector3 = current_horizontal.lerp(target_horizontal, lerp_rate * delta)
@@ -425,8 +541,8 @@ func transition_to(new_state: CombatState) -> bool:
 
 	match new_state:
 		CombatState.IDLE:
-			if combat_state == CombatState.ATTACK:
-				# Cannot exit attack prematurely
+			if combat_state == CombatState.ATTACK or (combat_state == CombatState.COUNTER and not _counter_strike_executed):
+				# Cannot exit attack or active counter prematurely
 				return false
 			combat_state = CombatState.IDLE
 			_block_transition = ""
@@ -437,7 +553,7 @@ func transition_to(new_state: CombatState) -> bool:
 			return true
 
 		CombatState.RUN:
-			if combat_state == CombatState.ATTACK:
+			if combat_state == CombatState.ATTACK or combat_state == CombatState.COUNTER:
 				return false
 			combat_state = CombatState.RUN
 			_block_transition = ""
@@ -447,7 +563,7 @@ func transition_to(new_state: CombatState) -> bool:
 			return true
 
 		CombatState.ATTACK:
-			if combat_state == CombatState.ATTACK or combat_state == CombatState.DODGE:
+			if combat_state == CombatState.ATTACK or combat_state == CombatState.DODGE or combat_state == CombatState.COUNTER:
 				return false
 			_block_transition = ""
 			if combat and not combat.start_attack():
@@ -475,8 +591,8 @@ func transition_to(new_state: CombatState) -> bool:
 			return true
 
 		CombatState.BLOCK:
-			if is_shield_broken or combat_state == CombatState.ATTACK or combat_state == CombatState.DEAD or combat_state == CombatState.DODGE or _combo_finisher_recovery_timer > 0.0:
-				# Block rejected while shield broken, attacking, dead, or dodging
+			if is_shield_broken or combat_state == CombatState.ATTACK or combat_state == CombatState.DEAD or combat_state == CombatState.DODGE or combat_state == CombatState.COUNTER or _combo_finisher_recovery_timer > 0.0:
+				# Block rejected while shield broken, attacking, dead, dodging, or countering
 				return false
 			reset_combo()
 			combat_state = CombatState.BLOCK
@@ -491,7 +607,7 @@ func transition_to(new_state: CombatState) -> bool:
 			return true
 
 		CombatState.DODGE:
-			if combat_state == CombatState.DEAD or _combo_finisher_recovery_timer > 0.0:
+			if combat_state == CombatState.DEAD or combat_state == CombatState.COUNTER or _combo_finisher_recovery_timer > 0.0:
 				return false
 			if is_shield_broken or _shield_stun_timer > 0.0:
 				return false
@@ -516,6 +632,24 @@ func transition_to(new_state: CombatState) -> bool:
 			state_changed.emit(old_state, combat_state)
 			return true
 
+		CombatState.COUNTER:
+			if combat_state == CombatState.DEAD:
+				return false
+			reset_combo()
+			_knockback_timer = 0.0
+			_knockback_vel = Vector3.ZERO
+			combat_state = CombatState.COUNTER
+			_block_transition = ""
+			if anim_player:
+				if anim_player.has_animation("attack"):
+					anim_player.speed_scale = 1.6
+					anim_player.play("attack", 0.05)
+				elif anim_player.has_animation("run"):
+					anim_player.speed_scale = 1.0
+					anim_player.play("run", 0.05)
+			state_changed.emit(old_state, combat_state)
+			return true
+
 	return false
 
 
@@ -525,9 +659,16 @@ func _enter_dead_state() -> void:
 	reset_combo()
 	_attack_impact_applied = true # Stop any pending impact
 	_block_transition = ""
+	_counter_target = null
+	_counter_strike_executed = false
+	_counter_timer = 0.0
+	_counter_recovery_timer = 0.0
 
 	if dodge_controller:
 		dodge_controller.reset()
+	if active_ability_action:
+		active_ability_action.cancel()
+		active_ability_action = null
 	if stamina_component:
 		stamina_component.reset_stamina()
 	CombatTimeManager.reset_time()
@@ -555,13 +696,185 @@ var is_dodging: bool:
 	get:
 		return combat_state == CombatState.DODGE or (dodge_controller != null and dodge_controller.is_dodging)
 
+var is_dodging_iframe: bool:
+	get:
+		return is_in_dodge_iframe()
+
+var is_invulnerable: bool:
+	get:
+		return is_in_dodge_iframe()
+
 
 func is_in_dodge_iframe() -> bool:
 	return dodge_controller != null and dodge_controller.is_in_dodge_iframe()
 
 
+func can_perfect_dodge_attack(payload_or_dodgeable: Variant = true) -> bool:
+	if dodge_controller and dodge_controller.has_method("can_perfect_dodge_attack"):
+		return dodge_controller.can_perfect_dodge_attack(payload_or_dodgeable)
+	return is_in_dodge_iframe()
+
+
+func register_perfect_dodge(payload: Variant = null) -> bool:
+	if dodge_controller and dodge_controller.has_method("register_perfect_dodge"):
+		return dodge_controller.register_perfect_dodge(payload)
+	return false
+
+
 func is_counter_window_active() -> bool:
 	return dodge_controller != null and dodge_controller.counter_window_active
+
+
+func find_counter_target(range_limit: float = 8.0) -> Node3D:
+	var candidates: Array[Node3D] = []
+
+	# 1. Physics shape intersection in radius range_limit
+	var world_3d: World3D = get_world_3d()
+	if world_3d and is_inside_tree():
+		var space_state: PhysicsDirectSpaceState3D = world_3d.direct_space_state
+		if space_state:
+			var query: PhysicsShapeQueryParameters3D = PhysicsShapeQueryParameters3D.new()
+			var sphere: SphereShape3D = SphereShape3D.new()
+			sphere.radius = range_limit
+			query.shape = sphere
+			query.transform = Transform3D(Basis.IDENTITY, global_position + Vector3(0.0, 0.9, 0.0))
+			query.collision_mask = 4 # Target collision layer
+			query.collide_with_areas = false
+			query.collide_with_bodies = true
+			query.exclude = [get_rid()]
+			var hits: Array[Dictionary] = space_state.intersect_shape(query, 32)
+			for hit in hits:
+				var col: Object = hit.get("collider")
+				if col is Node3D and not (col in candidates):
+					candidates.append(col as Node3D)
+
+	# 2. Scene tree search across relevant enemy groups / nodes (robust for both live scene and tests)
+	if is_inside_tree():
+		for grp in ["enemies", "training_dummy", "targets"]:
+			for node in get_tree().get_nodes_in_group(grp):
+				if node is Node3D and not (node in candidates):
+					candidates.append(node as Node3D)
+
+	var best_target: Node3D = null
+	var best_score: float = -999999.0
+	var player_fwd: Vector3 = get_facing_direction()
+
+	for cand in candidates:
+		if cand == self or is_ancestor_of(cand) or cand.is_ancestor_of(self):
+			continue
+		if not cand.has_method("take_damage"):
+			continue
+		# Ignore dead / defeated targets
+		if cand.has_method("is_dead") and cand.call("is_dead"):
+			continue
+		if cand.has_method("is_alive") and not cand.call("is_alive"):
+			continue
+		if cand.has_method("is_targetable") and not cand.call("is_targetable"):
+			continue
+		if "health_component" in cand and cand.health_component != null:
+			if cand.health_component.has_method("is_dead") and cand.health_component.is_dead():
+				continue
+
+		var to_cand: Vector3 = cand.global_position - global_position
+		to_cand.y = 0.0
+		var dist: float = to_cand.length()
+		if dist > range_limit:
+			continue
+
+		var dir: Vector3 = to_cand.normalized() if dist > 0.001 else player_fwd
+		var facing_dot: float = player_fwd.dot(dir)
+		# Score combines facing alignment (highest priority) and proximity
+		var score: float = facing_dot * 3.0 + (1.0 - (dist / range_limit))
+		if score > best_score:
+			best_score = score
+			best_target = cand
+
+	return best_target
+
+
+func try_counter_attack(is_new_press: bool = true) -> bool:
+	if not is_new_press:
+		return false
+	if not is_counter_window_active():
+		return false
+	if combat_state == CombatState.DEAD:
+		return false
+	var target_enemy: Node3D = find_counter_target(8.0)
+	if target_enemy == null:
+		return false
+	if dodge_controller:
+		dodge_controller.consume_counter_window()
+	return _start_counter_attack(target_enemy)
+
+
+func _start_counter_attack(target_enemy: Node3D) -> bool:
+	if combat_state == CombatState.DEAD:
+		return false
+	if target_enemy == null:
+		return false
+
+	if dodge_controller and dodge_controller.is_dodging:
+		dodge_controller.cancel_dodge()
+
+	_counter_target = target_enemy
+	_counter_timer = 0.0
+	_counter_lunge_total_time = counter_lunge_duration
+	_counter_strike_executed = false
+	_counter_recovery_timer = 0.0
+
+	var success: bool = transition_to(CombatState.COUNTER)
+	if success:
+		var to_target: Vector3 = target_enemy.global_position - global_position
+		to_target.y = 0.0
+		if to_target.length_squared() > 0.0001:
+			var look_yaw: float = atan2(-to_target.x, -to_target.z)
+			if visuals:
+				visuals.rotation.y = look_yaw
+			_camera_yaw = look_yaw
+	return success
+
+
+func _execute_counter_strike() -> void:
+	if _counter_strike_executed:
+		return
+	_counter_strike_executed = true
+	_counter_recovery_timer = 0.20
+
+	if is_instance_valid(_counter_target):
+		var to_target: Vector3 = _counter_target.global_position - global_position
+		to_target.y = 0.0
+		var fwd: Vector3 = to_target.normalized() if to_target.length_squared() > 0.0001 else get_facing_direction()
+		if visuals:
+			visuals.rotation.y = atan2(-fwd.x, -fwd.z)
+		_camera_yaw = atan2(-fwd.x, -fwd.z)
+
+		# Deal damage via existing combat pipeline
+		if _counter_target.has_method("take_damage"):
+			_counter_target.call("take_damage", counter_attack_damage, global_position)
+
+		# Feedback and VFX
+		if combat:
+			var hit_pos: Vector3 = _counter_target.global_position + Vector3(0.0, 0.9, 0.0) - fwd * 0.3
+			if combat.has_method("trigger_hit_impact"):
+				combat.trigger_hit_impact(hit_pos, -fwd)
+			if combat.slash_arc_vfx and combat.slash_arc_vfx.has_method("trigger"):
+				combat.slash_arc_vfx.trigger(fwd, global_position)
+			if combat.has_method("spawn_damage_number"):
+				var dmg_pos: Vector3 = _counter_target.global_position + Vector3(0.0, 1.2, 0.0)
+				combat.spawn_damage_number(dmg_pos, counter_attack_damage, false, 0.0)
+
+		if combat_feedback and combat_feedback.has_method("trigger_hit_feedback"):
+			combat_feedback.trigger_hit_feedback(_counter_target, counter_attack_damage)
+
+
+func _finish_counter_attack() -> void:
+	reset_combo()
+	_counter_target = null
+	_counter_strike_executed = false
+	var old_state: CombatState = combat_state
+	combat_state = CombatState.IDLE
+	state_changed.emit(old_state, combat_state)
+	_update_locomotion_animations()
 
 
 func _can_cancel_attack_into_dodge() -> bool:
@@ -577,8 +890,13 @@ func _try_dodge() -> bool:
 		return false
 	if is_shield_broken or _shield_stun_timer > 0.0:
 		return false
-	if combat_state == CombatState.DODGE:
+	if combat_state == CombatState.DODGE or combat_state == CombatState.COUNTER:
 		return false
+	if active_ability_action and active_ability_action.is_active():
+		if not active_ability_action.allows_dodge():
+			return false
+		active_ability_action.cancel()
+		active_ability_action = null
 	if not dodge_controller:
 		return false
 	if not dodge_controller.can_dodge():
@@ -632,7 +950,11 @@ func _try_cast_ability(slot_name: String) -> bool:
 		return false
 	if _combo_finisher_recovery_timer > 0.0:
 		return false
-	if combat_state == CombatState.DODGE:
+	if combat_state == CombatState.DODGE or combat_state == CombatState.COUNTER:
+		return false
+	if is_shield_broken or _shield_stun_timer > 0.0:
+		return false
+	if active_ability_action and active_ability_action.is_active():
 		return false
 	if not ability_system:
 		return false
@@ -657,9 +979,282 @@ func _try_cast_ability(slot_name: String) -> bool:
 	if not ability_system.cast_ability(slot_name):
 		return false
 
-	_execute_ability_effect(slot_name, ability)
+	active_ability_action = AbilityAction.new()
+	active_ability_action.init_action(self, slot_name, ability)
+	active_ability_action.action_finished.connect(_on_ability_action_finished.bind(slot_name))
+	active_ability_action.action_cancelled.connect(_on_ability_action_cancelled.bind(slot_name))
+	ability_action_started.emit(slot_name, ability)
+
+	if ability.id == "shield_charge":
+		_start_shield_charge(ability)
+	else:
+		_execute_ability_effect(slot_name, ability)
 	return true
 
+
+func _on_ability_action_finished(slot_name: String) -> void:
+	_retract_giant_shield()
+	_combo_step = 0
+	_combo_recovery_timer = 0.0
+	_update_locomotion_animations()
+	ability_action_finished.emit(slot_name)
+	active_ability_action = null
+
+
+func _on_ability_action_cancelled(slot_name: String) -> void:
+	_retract_giant_shield()
+	_combo_step = 0
+	_combo_recovery_timer = 0.0
+	_update_locomotion_animations()
+	ability_action_finished.emit(slot_name)
+	active_ability_action = null
+
+
+func _setup_giant_shield_visual() -> void:
+	if _giant_shield_visual:
+		return
+	if not visuals:
+		return
+
+	if not _skeleton:
+		_skeleton = visuals.find_child("Skeleton3D", true, false) as Skeleton3D
+	if _skeleton:
+		_shield_bone_idx = _skeleton.find_bone("hand.L")
+
+	_giant_shield_visual = Node3D.new()
+	_giant_shield_visual.name = "GiantShieldVisual"
+	visuals.add_child(_giant_shield_visual)
+	_giant_shield_visual.position = Vector3(-0.35, 0.95, -0.55)
+	_giant_shield_visual.scale = Vector3.ZERO
+	_giant_shield_visual.visible = false
+
+	var plate_mesh: MeshInstance3D = MeshInstance3D.new()
+	plate_mesh.name = "ShieldPlate"
+	var box: BoxMesh = BoxMesh.new()
+	box.size = Vector3(1.1, 1.6, 0.12)
+	plate_mesh.mesh = box
+
+	var mat: StandardMaterial3D = StandardMaterial3D.new()
+	mat.shading_mode = BaseMaterial3D.SHADING_MODE_PER_PIXEL
+	mat.albedo_color = Color(0.2, 0.65, 1.0, 0.85)
+	mat.emission_enabled = true
+	mat.emission = Color(0.1, 0.45, 0.95, 1.0)
+	mat.emission_energy_multiplier = 1.6
+	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	plate_mesh.material_override = mat
+	_giant_shield_visual.add_child(plate_mesh)
+
+	var rim_mesh: MeshInstance3D = MeshInstance3D.new()
+	rim_mesh.name = "ShieldRim"
+	var rim_box: BoxMesh = BoxMesh.new()
+	rim_box.size = Vector3(1.18, 1.68, 0.06)
+	rim_mesh.mesh = rim_box
+
+	var rim_mat: StandardMaterial3D = StandardMaterial3D.new()
+	rim_mat.albedo_color = Color(1.0, 0.85, 0.25, 1.0)
+	rim_mat.emission_enabled = true
+	rim_mat.emission = Color(1.0, 0.8, 0.2, 1.0)
+	rim_mat.emission_energy_multiplier = 1.8
+	rim_mesh.material_override = rim_mat
+	_giant_shield_visual.add_child(rim_mesh)
+
+
+func _enlarge_giant_shield() -> void:
+	_setup_giant_shield_visual()
+	is_shield_enlarged = true
+	if _shield_visual_tween and _shield_visual_tween.is_valid():
+		_shield_visual_tween.kill()
+
+	if _giant_shield_visual:
+		_giant_shield_visual.visible = true
+		_shield_visual_tween = create_tween()
+		_shield_visual_tween.tween_property(_giant_shield_visual, "scale", Vector3(1.3, 1.3, 1.3), 0.18)\
+			.set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+
+	if _skeleton and _shield_bone_idx >= 0:
+		_skeleton.set_bone_pose_scale(_shield_bone_idx, Vector3(1.8, 1.8, 1.8))
+
+
+func _retract_giant_shield() -> void:
+	is_shield_enlarged = false
+	if _shield_visual_tween and _shield_visual_tween.is_valid():
+		_shield_visual_tween.kill()
+
+	if _giant_shield_visual:
+		_shield_visual_tween = create_tween()
+		_shield_visual_tween.tween_property(_giant_shield_visual, "scale", Vector3.ZERO, 0.22)\
+			.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
+		_shield_visual_tween.tween_callback(func() -> void:
+			if _giant_shield_visual:
+				_giant_shield_visual.visible = false
+		)
+
+	if _skeleton and _shield_bone_idx >= 0:
+		_skeleton.set_bone_pose_scale(_shield_bone_idx, Vector3.ONE)
+
+
+func _start_shield_charge(ability: AbilityData) -> void:
+	_enlarge_giant_shield()
+	_orient_attack_direction()
+	if anim_player:
+		if anim_player.has_animation("block_start"):
+			anim_player.speed_scale = 1.4
+			anim_player.play("block_start", 0.08)
+		elif anim_player.has_animation("block_hold"):
+			anim_player.play("block_hold", 0.08)
+
+	if active_ability_action:
+		active_ability_action.phase_changed.connect(_on_shield_charge_phase_changed)
+
+
+func _on_shield_charge_phase_changed(old_phase: int, new_phase: int) -> void:
+	if new_phase == AbilityAction.Phase.ACTIVE:
+		print("[ShieldCharge] Phase: ACTIVE")
+		if anim_player and anim_player.has_animation("block_hold"):
+			anim_player.play("block_hold", 0.08)
+	elif new_phase == AbilityAction.Phase.RECOVERY:
+		print("[ShieldCharge] Phase: RECOVERY")
+		_retract_giant_shield()
+		if anim_player and anim_player.has_animation("block_release"):
+			anim_player.play("block_release", 0.1)
+	elif new_phase == AbilityAction.Phase.FINISHED:
+		print("[ShieldCharge] Phase: FINISHED")
+		_retract_giant_shield()
+
+
+func _process_shield_charge(delta: float) -> void:
+	var action = active_ability_action
+	if not action or not action.is_active():
+		return
+
+	# Update the ability first
+	action.update(delta)
+
+	if not is_instance_valid(action):
+		return
+	if active_ability_action != action:
+		return
+	if not action.is_active():
+		return
+
+	match action.current_phase:
+		AbilityAction.Phase.STARTUP:
+			velocity.x = move_toward(velocity.x, 0.0, friction * delta)
+			velocity.z = move_toward(velocity.z, 0.0, friction * delta)
+			if not is_on_floor():
+				velocity.y -= gravity * delta
+			else:
+				velocity.y = -0.1
+			move_and_slide()
+			if visuals:
+				visuals.rotation.y = _camera_yaw
+
+		AbilityAction.Phase.ACTIVE:
+			# Player can steer charge using camera/mouse direction with a turn limit
+			_last_global_position = global_position
+
+			var target_yaw: float = _camera_yaw
+			var current_yaw: float = visuals.rotation.y if visuals else _camera_yaw
+			var diff: float = wrapf(target_yaw - current_yaw, -PI, PI)
+			var max_turn_step: float = steering_turn_rate * delta
+			var step: float = clamp(diff, -max_turn_step, max_turn_step)
+			var new_yaw: float = current_yaw + step
+
+			if visuals:
+				visuals.rotation.y = new_yaw
+
+			var fwd: Vector3 = Vector3(-sin(new_yaw), 0.0, -cos(new_yaw))
+			var charge_speed: float = action.data.movement_speed
+			velocity.x = fwd.x * charge_speed
+			velocity.z = fwd.z * charge_speed
+
+			if not is_on_floor():
+				velocity.y -= gravity * delta
+			else:
+				velocity.y = -0.1
+
+			move_and_slide()
+			_check_shield_charge_hit(fwd)
+
+		AbilityAction.Phase.RECOVERY:
+			velocity.x = move_toward(velocity.x, 0.0, friction * 2.0 * delta)
+			velocity.z = move_toward(velocity.z, 0.0, friction * 2.0 * delta)
+			if not is_on_floor():
+				velocity.y -= gravity * delta
+			else:
+				velocity.y = -0.1
+			move_and_slide()
+
+func _check_shield_charge_hit(fwd: Vector3) -> void:
+	if not active_ability_action or active_ability_action.current_phase != AbilityAction.Phase.ACTIVE:
+		return
+
+	var space_state: PhysicsDirectSpaceState3D = get_world_3d().direct_space_state if get_world_3d() else null
+	if space_state:
+		var query: PhysicsShapeQueryParameters3D = PhysicsShapeQueryParameters3D.new()
+		var sphere: SphereShape3D = SphereShape3D.new()
+		sphere.radius = 1.3
+		query.shape = sphere
+		query.transform = Transform3D(Basis.IDENTITY, global_position + Vector3(0.0, 0.9, 0.0) + fwd * 0.8)
+		query.collision_mask = 4 # Enemies collision layer
+		query.exclude = [get_rid()]
+		var hits: Array[Dictionary] = space_state.intersect_shape(query, 8)
+		for hit in hits:
+			var col: Object = hit.get("collider")
+			if col and col is Node and col != self and col.has_method("take_damage"):
+				var target_node: Node = col as Node
+				if active_ability_action and active_ability_action.can_hit_target(target_node):
+					active_ability_action.register_hit(target_node)
+					_apply_shield_charge_impact(target_node, fwd)
+
+	# Query nodes in "enemies" group within front cone and range
+	var tree: SceneTree = get_tree()
+	if tree:
+		var enemies: Array[Node] = tree.get_nodes_in_group("enemies")
+		for enemy in enemies:
+			if enemy and enemy is Node3D and enemy != self and enemy.has_method("take_damage"):
+				var to_enemy: Vector3 = (enemy as Node3D).global_position - global_position
+				to_enemy.y = 0.0
+				var dist: float = to_enemy.length()
+				if dist <= 2.2:
+					var enemy_dir: Vector3 = to_enemy.normalized() if dist > 0.0001 else fwd
+					var dot_val = fwd.dot(enemy_dir)
+					if dot_val > 0.15:
+						if active_ability_action and active_ability_action.can_hit_target(enemy):
+							active_ability_action.register_hit(enemy)
+							_apply_shield_charge_impact(enemy, fwd)
+
+	for i in range(get_slide_collision_count()):
+		var col_info: KinematicCollision3D = get_slide_collision(i)
+		if col_info:
+			var col_obj: Object = col_info.get_collider()
+			if col_obj and col_obj is Node and col_obj != self and col_obj.has_method("take_damage"):
+				var target_node: Node = col_obj as Node
+				if active_ability_action and active_ability_action.can_hit_target(target_node):
+					active_ability_action.register_hit(target_node)
+					_apply_shield_charge_impact(target_node, fwd)
+
+
+func _apply_shield_charge_impact(target_node: Node, fwd: Vector3) -> void:
+	var dmg: float = active_ability_action.data.damage if active_ability_action and active_ability_action.data else 25.0
+	target_node.call("take_damage", dmg, global_position)
+	if combat and combat.has_method("trigger_hit_impact"):
+		combat.trigger_hit_impact(target_node.global_position, -fwd)
+	if combat_feedback:
+		combat_feedback.trigger_hit_feedback(target_node, dmg)
+	apply_camera_recoil(0)
+	# Stop forward movement and force transition to recovery phase
+	velocity.x = 0.0
+	velocity.z = 0.0
+	if active_ability_action:
+		active_ability_action.phase_timer = 0.001
+		# Calculate a precise stop position with a visual gap (1.0m center-to-center distance)
+		if target_node is Node3D:
+			var target_pos: Vector3 = target_node.global_position
+			var ideal_pos: Vector3 = target_pos - fwd * 1.0
+			global_position = Vector3(ideal_pos.x, global_position.y, ideal_pos.z)
+		else:
+			global_position = _last_global_position
 
 func _execute_ability_effect(slot_name: String, ability: AbilityData) -> void:
 	_orient_attack_direction()
@@ -683,14 +1278,20 @@ func _execute_ability_effect(slot_name: String, ability: AbilityData) -> void:
 			if col and col is Node and col.has_method("take_damage"):
 				var target_node: Node = col as Node
 				if target_node != self:
-					target_node.call("take_damage", ability.damage, global_position)
+					if active_ability_action == null or active_ability_action.can_hit_target(target_node):
+						if active_ability_action:
+							active_ability_action.register_hit(target_node)
+						target_node.call("take_damage", ability.damage, global_position)
 	else:
 		if combat and combat.has_method("get_valid_target_in_range"):
 			var target: Node = combat.get_valid_target_in_range()
 			if target and target.has_method("take_damage"):
-				target.call("take_damage", ability.damage, global_position)
-				if combat.has_method("trigger_hit_impact"):
-					combat.trigger_hit_impact(target.global_position, -fwd)
+				if active_ability_action == null or active_ability_action.can_hit_target(target):
+					if active_ability_action:
+						active_ability_action.register_hit(target)
+					target.call("take_damage", ability.damage, global_position)
+					if combat.has_method("trigger_hit_impact"):
+						combat.trigger_hit_impact(target.global_position, -fwd)
 
 	if ability.id == "shield_bash":
 		shield_durability = minf(shield_max_durability, shield_durability + 25.0)
@@ -707,9 +1308,8 @@ func _execute_ability_effect(slot_name: String, ability: AbilityData) -> void:
 			combat_feedback.trigger_skill_feedback(ability.id)
 
 
-
 func can_block() -> bool:
-	return not is_shield_broken and combat_state != CombatState.DEAD and combat_state != CombatState.ATTACK and _combo_finisher_recovery_timer <= 0.0
+	return not is_shield_broken and combat_state != CombatState.DEAD and combat_state != CombatState.ATTACK and combat_state != CombatState.COUNTER and _combo_finisher_recovery_timer <= 0.0 and (active_ability_action == null or not active_ability_action.is_active())
 
 
 func is_in_combo_window() -> bool:
@@ -783,7 +1383,9 @@ func _try_combat_attack() -> bool:
 		return false
 	if is_shield_broken or _shield_stun_timer > 0.0:
 		return false
-	if combat_state == CombatState.DODGE:
+	if combat_state == CombatState.DODGE or combat_state == CombatState.COUNTER:
+		return false
+	if active_ability_action and active_ability_action.is_active():
 		return false
 
 	# Task 5.14D: Manual click-to-advance combo
@@ -809,7 +1411,7 @@ func _try_combat_attack() -> bool:
 
 
 func _start_block() -> bool:
-	if is_shield_broken or combat_state == CombatState.DEAD or _combo_finisher_recovery_timer > 0.0:
+	if is_shield_broken or combat_state == CombatState.DEAD or combat_state == CombatState.COUNTER or _combo_finisher_recovery_timer > 0.0 or (active_ability_action and active_ability_action.is_active()):
 		return false
 	return transition_to(CombatState.BLOCK)
 
@@ -854,6 +1456,7 @@ func take_damage(amount_or_payload: Variant, attacker_pos: Vector3 = NO_ATTACKER
 	var is_dodgeable: bool = true
 	var is_perfect_dodge_eligible: bool = true
 	var stamina_reward: float = 25.0
+	var attack_payload: Variant = null
 
 	if amount_or_payload is AttackPayload:
 		var payload: AttackPayload = amount_or_payload as AttackPayload
@@ -863,8 +1466,27 @@ func take_damage(amount_or_payload: Variant, attacker_pos: Vector3 = NO_ATTACKER
 		is_dodgeable = payload.is_dodgeable
 		is_perfect_dodge_eligible = payload.is_perfect_dodge_eligible
 		stamina_reward = payload.stamina_reward
+		attack_payload = payload
+	elif amount_or_payload is Dictionary:
+		var dict: Dictionary = amount_or_payload as Dictionary
+		if dict.has("damage"):
+			amount = float(dict["damage"])
+		if dict.has("attacker_pos"):
+			attacker_pos = dict["attacker_pos"]
+		if dict.has("incoming_shield_damage"):
+			incoming_shield_damage = float(dict["incoming_shield_damage"])
+		if dict.has("is_dodgeable"):
+			is_dodgeable = bool(dict["is_dodgeable"])
+		elif dict.has("dodgeable"):
+			is_dodgeable = bool(dict["dodgeable"])
+		if dict.has("is_perfect_dodge_eligible"):
+			is_perfect_dodge_eligible = bool(dict["is_perfect_dodge_eligible"])
+		if dict.has("stamina_reward"):
+			stamina_reward = float(dict["stamina_reward"])
+		attack_payload = dict
 	elif amount_or_payload is float or amount_or_payload is int:
 		amount = float(amount_or_payload)
+		attack_payload = AttackPayload.new(amount, attacker_pos, incoming_shield_damage, is_dodgeable, is_perfect_dodge_eligible, stamina_reward)
 
 	# --- DODGE & PERFECT DODGE CHECK ---
 	if is_in_dodge_iframe():
@@ -874,10 +1496,27 @@ func take_damage(amount_or_payload: Variant, attacker_pos: Vector3 = NO_ATTACKER
 			_knockback_vel = Vector3.ZERO
 			if dodge_controller and is_perfect_dodge_eligible:
 				dodge_controller.perfect_dodge_stamina_bonus = stamina_reward
-				dodge_controller.trigger_perfect_dodge()
-				CombatTimeManager.apply_slow_motion(0.2, 0.3)
-				if combat_feedback and combat_feedback.has_method("trigger_perfect_dodge_feedback"):
-					combat_feedback.trigger_perfect_dodge_feedback()
+				var was_new: bool = dodge_controller.register_perfect_dodge(attack_payload)
+				if was_new:
+					CombatTimeManager.apply_slow_motion(0.2, 0.3)
+					if combat_feedback and combat_feedback.has_method("trigger_perfect_dodge_feedback"):
+						combat_feedback.trigger_perfect_dodge_feedback()
+			return
+
+	# --- ABILITY FRONT PROTECTION CHECK ---
+	if active_ability_action and active_ability_action.has_front_protection() and attacker_pos != NO_ATTACKER_POS:
+		if combat and combat.is_attack_inside_block_cone(self, attacker_pos, block_cone_deg):
+			_knockback_timer = 0.0
+			_knockback_vel = Vector3.ZERO
+			if combat:
+				var to_attacker: Vector3 = attacker_pos - global_position
+				to_attacker.y = 0.0
+				var to_attacker_dir: Vector3 = to_attacker.normalized() if to_attacker.length_squared() > 0.0001 else Vector3.FORWARD
+				var block_pos: Vector3 = global_position + Vector3(0.0, 0.9, 0.0) + to_attacker_dir * 0.4
+				if combat.has_method("trigger_block_impact"):
+					combat.trigger_block_impact(block_pos, -to_attacker_dir)
+			if combat_feedback and combat_feedback.has_method("trigger_block_feedback"):
+				combat_feedback.trigger_block_feedback(attacker_pos)
 			return
 
 	var final_damage: float = amount
@@ -1153,6 +1792,9 @@ func respawn(spawn_pos: Vector3 = Vector3.ZERO, spawn_yaw: float = 0.0) -> void:
 		stamina_component.reset_stamina()
 	if dodge_controller:
 		dodge_controller.reset()
+	if active_ability_action:
+		active_ability_action.cancel()
+		active_ability_action = null
 	if ability_system:
 		ability_system.reset_cooldowns()
 	CombatTimeManager.reset_time()
@@ -1299,7 +1941,8 @@ func _setup_animation_player() -> void:
 		if anim_player.has_animation("dead"):
 			anim_player.get_animation("dead").loop_mode = Animation.LOOP_NONE
 
-		anim_player.animation_finished.connect(_on_animation_finished)
+		if not anim_player.animation_finished.is_connected(_on_animation_finished):
+			anim_player.animation_finished.connect(_on_animation_finished)
 		anim_player.play("idle")
 
 
