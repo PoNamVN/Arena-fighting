@@ -131,3 +131,66 @@ func play_audio_event(event_name: String) -> void:
 			audio_death.emit()
 			if sfx_death and sfx_death.stream:
 				sfx_death.play()
+		"dodge":
+			audio_dodge.emit()
+		"perfect_dodge":
+			audio_perfect_dodge.emit()
+		"skill_used":
+			audio_skill_used.emit("")
+		"ultimate_used":
+			audio_ultimate_used.emit()
+
+
+signal audio_dodge()
+signal audio_perfect_dodge()
+signal audio_skill_used(skill_id: String)
+signal audio_ultimate_used()
+
+
+func trigger_dodge_feedback() -> void:
+	play_audio_event("dodge")
+
+
+func trigger_perfect_dodge_feedback() -> void:
+	play_audio_event("perfect_dodge")
+	if not screen_emphasis:
+		return
+	if _screen_tween and _screen_tween.is_valid():
+		_screen_tween.kill()
+
+	screen_emphasis.visible = true
+	# Golden cyan flash for perfect dodge
+	screen_emphasis.color = Color(0.2, 0.9, 1.0, 1.0)
+	screen_emphasis.modulate.a = 0.35
+	_screen_tween = create_tween()
+	_screen_tween.tween_property(screen_emphasis, "modulate:a", 0.0, 0.28)\
+		.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+	_screen_tween.tween_callback(func() -> void:
+		if screen_emphasis:
+			screen_emphasis.visible = false
+			screen_emphasis.color = Color(1.0, 1.0, 1.0, 1.0)
+	)
+
+
+func trigger_skill_feedback(skill_id: String) -> void:
+	play_audio_event("skill_used")
+	audio_skill_used.emit(skill_id)
+
+
+func trigger_ultimate_feedback() -> void:
+	play_audio_event("ultimate_used")
+	audio_ultimate_used.emit()
+	if screen_emphasis:
+		if _screen_tween and _screen_tween.is_valid():
+			_screen_tween.kill()
+		screen_emphasis.visible = true
+		screen_emphasis.color = Color(1.0, 0.85, 0.2, 1.0)
+		screen_emphasis.modulate.a = 0.45
+		_screen_tween = create_tween()
+		_screen_tween.tween_property(screen_emphasis, "modulate:a", 0.0, 0.40)\
+			.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+		_screen_tween.tween_callback(func() -> void:
+			if screen_emphasis:
+				screen_emphasis.visible = false
+				screen_emphasis.color = Color(1.0, 1.0, 1.0, 1.0)
+		)

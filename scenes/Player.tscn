@@ -13,6 +13,11 @@
 [ext_resource type="PackedScene" uid="uid://d1p8x4w2m7r9k" path="res://scenes/AttackTelegraphVFX.tscn" id="10_telegraph"]
 [ext_resource type="PackedScene" uid="uid://b7v9x2m4r1k5p" path="res://scenes/CombatFeedback.tscn" id="11_combat_feedback"]
 
+[ext_resource type="Script" path="res://scripts/StaminaComponent.gd" id="12_stamina"]
+[ext_resource type="Script" path="res://scripts/DodgeController.gd" id="13_dodge"]
+[ext_resource type="Script" path="res://scripts/AbilitySystem.gd" id="14_ability"]
+[ext_resource type="Script" path="res://scripts/CombatTimeManager.gd" id="15_time_mgr"]
+
 [sub_resource type="CapsuleShape3D" id="CapsuleShape3D_body"]
 radius = 0.4
 height = 1.8
@@ -86,3 +91,14 @@ max_health = 100.0
 
 [node name="CombatFeedback" parent="." instance=ExtResource("11_combat_feedback")]
 
+[node name="StaminaComponent" type="Node" parent="."]
+script = ExtResource("12_stamina")
+
+[node name="DodgeController" type="Node" parent="."]
+script = ExtResource("13_dodge")
+
+[node name="AbilitySystem" type="Node" parent="."]
+script = ExtResource("14_ability")
+
+[node name="CombatTimeManager" type="Node" parent="."]
+script = ExtResource("15_time_mgr")
