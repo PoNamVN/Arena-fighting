@@ -417,6 +417,11 @@ func _physics_process(delta: float) -> void:
 		_process_shield_charge(delta)
 		return
 
+	# SKY DIVE (Ability X) foundation movement
+	if active_ability_action and active_ability_action.is_active() and active_ability_action.data and active_ability_action.data.id == "sky_dive":
+		_process_sky_dive(delta)
+		return
+
 	# Shield break timers
 	if shield_state == ShieldState.BROKEN:
 		if _shield_stun_timer > 0.0:
@@ -987,6 +992,8 @@ func _try_cast_ability(slot_name: String) -> bool:
 
 	if ability.id == "shield_charge":
 		_start_shield_charge(ability)
+	elif ability.id == "sky_dive":
+		_start_sky_dive(ability)
 	else:
 		_execute_ability_effect(slot_name, ability)
 	return true
@@ -1122,6 +1129,21 @@ func _on_shield_charge_phase_changed(old_phase: int, new_phase: int) -> void:
 		_retract_giant_shield()
 
 
+func _start_sky_dive(ability: AbilityData) -> void:
+	_orient_attack_direction()
+	if active_ability_action:
+		active_ability_action.phase_changed.connect(_on_sky_dive_phase_changed)
+
+
+func _on_sky_dive_phase_changed(old_phase: int, new_phase: int) -> void:
+	if new_phase == AbilityAction.Phase.ACTIVE:
+		print("[SkyDive] Phase: AIM/PENDING (ACTIVE)")
+	elif new_phase == AbilityAction.Phase.RECOVERY:
+		print("[SkyDive] Phase: RECOVERY")
+	elif new_phase == AbilityAction.Phase.FINISHED:
+		print("[SkyDive] Phase: FINISHED")
+
+
 func _process_shield_charge(delta: float) -> void:
 	var action = active_ability_action
 	if not action or not action.is_active():
@@ -1179,6 +1201,32 @@ func _process_shield_charge(delta: float) -> void:
 		AbilityAction.Phase.RECOVERY:
 			velocity.x = move_toward(velocity.x, 0.0, friction * 2.0 * delta)
 			velocity.z = move_toward(velocity.z, 0.0, friction * 2.0 * delta)
+			if not is_on_floor():
+				velocity.y -= gravity * delta
+			else:
+				velocity.y = -0.1
+			move_and_slide()
+
+
+func _process_sky_dive(delta: float) -> void:
+	var action = active_ability_action
+	if not action or not action.is_active():
+		return
+
+	# Update the ability first
+	action.update(delta)
+
+	if not is_instance_valid(action):
+		return
+	if active_ability_action != action:
+		return
+	if not action.is_active():
+		return
+
+	match action.current_phase:
+		AbilityAction.Phase.STARTUP, AbilityAction.Phase.ACTIVE, AbilityAction.Phase.RECOVERY:
+			velocity.x = move_toward(velocity.x, 0.0, friction * delta)
+			velocity.z = move_toward(velocity.z, 0.0, friction * delta)
 			if not is_on_floor():
 				velocity.y -= gravity * delta
 			else:
