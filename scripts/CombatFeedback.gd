@@ -97,7 +97,7 @@ func trigger_shield_break_feedback(pos: Vector3 = Vector3.ZERO) -> void:
 
 
 func trigger_screen_emphasis() -> void:
-	if not screen_emphasis:
+	if not screen_emphasis or (player and player.external_controlled):
 		return
 	if _screen_tween and _screen_tween.is_valid():
 		_screen_tween.kill()
@@ -153,7 +153,7 @@ func trigger_dodge_feedback() -> void:
 
 func trigger_perfect_dodge_feedback() -> void:
 	play_audio_event("perfect_dodge")
-	if not screen_emphasis:
+	if not screen_emphasis or (player and player.external_controlled):
 		return
 	if _screen_tween and _screen_tween.is_valid():
 		_screen_tween.kill()
@@ -179,7 +179,6 @@ func trigger_skill_feedback(skill_id: String) -> void:
 
 func trigger_ultimate_feedback() -> void:
 	play_audio_event("ultimate_used")
-	audio_ultimate_used.emit()
 	if screen_emphasis:
 		if _screen_tween and _screen_tween.is_valid():
 			_screen_tween.kill()

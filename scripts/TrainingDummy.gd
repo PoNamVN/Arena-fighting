@@ -13,7 +13,7 @@ extends StaticBody3D
 @export var normal_attack_shield_damage: float = 15.0
 @export var shield_recovery_delay: float = 2.0
 @export var auto_reset_on_death: bool = true
-@export var reset_delay: float = 1.0
+@export var reset_delay: float = 1.5
 
 ## Task 5.7: Hit Reaction & Knockback Tuning
 @export var hit_reaction_duration: float = 0.15
@@ -21,6 +21,8 @@ extends StaticBody3D
 @export var hit_knockback_duration: float = 0.10
 @export var block_recoil_distance: float = 0.08
 
+var frost: FreezeEffect
+var polymorph: PolymorphEffect
 var _knockback_tween: Tween = null
 var _flinch_tween: Tween = null
 var _hit_reaction_count: int = 0
@@ -32,16 +34,42 @@ var is_shield_broken: bool = false
 var _shield_recovery_timer: float = 0.0
 var _last_hit_was_blocked: bool = false
 
+var max_hp: float:
+	get:
+		return health_component.max_health if health_component else 100.0
+	set(value):
+		if health_component:
+			health_component.max_health = value
+			health_component.current_health = minf(health_component.current_health, value)
+
+var current_hp: float:
+	get:
+		return health_component.current_health if health_component else 0.0
+	set(value):
+		if health_component:
+			health_component.current_health = value
+			_update_health_bar(health_component.current_health, health_component.max_health)
+
+func is_alive() -> bool:
+	return health_component != null and not health_component.is_dead()
+
+func is_dead() -> bool:
+	return health_component == null or health_component.is_dead()
+
+func is_targetable() -> bool:
+	return is_alive()
+
 signal shield_durability_changed(current: float, maximum: float)
 signal shield_broken()
 signal shield_restored()
 signal hit_reacted(is_blocked: bool, hit_dir: Vector3)
+signal respawned()
 
 ## Node References
 @onready var health_component: HealthComponent = $HealthComponent
 @onready var body_mesh: MeshInstance3D = $Visuals/BodyMesh
-@onready var progress_bar: ProgressBar = $HealthBarViewport/ProgressBar
-@onready var health_bar_sprite: Sprite3D = $HealthBarSprite
+@onready var progress_bar: ProgressBar = get_node_or_null("HealthBarViewport/ProgressBar") as ProgressBar
+@onready var health_bar_sprite: Sprite3D = get_node_or_null("HealthBarSprite") as Sprite3D
 
 ## Internal State
 var _mesh_material: StandardMaterial3D
@@ -51,9 +79,18 @@ var _initial_transform: Transform3D
 
 
 func _ready() -> void:
+	polymorph = PolymorphEffect.new()
+	polymorph.actor = self
+	add_child(polymorph)
+	frost = FreezeEffect.new()
+	frost.actor = self
+	add_child(frost)
+	add_to_group("enemies")
+	add_to_group("training_dummy")
 	_initial_transform = global_transform
 	# Ensure dummy has an independent material instance for hit flash
 	_setup_material()
+	_setup_health_bar()
 
 	# Wire health signals
 	if health_component:
@@ -62,10 +99,51 @@ func _ready() -> void:
 		health_component.died.connect(_on_died)
 		_update_health_bar(health_component.current_health, health_component.max_health)
 
-	# Wire SubViewport texture to billboard sprite
-	if health_bar_sprite and has_node("HealthBarViewport"):
-		var viewport: SubViewport = $HealthBarViewport as SubViewport
-		health_bar_sprite.texture = viewport.get_texture()
+
+func _setup_health_bar() -> void:
+	var viewport: SubViewport = get_node_or_null("HealthBarViewport") as SubViewport
+	if not viewport:
+		viewport = SubViewport.new()
+		viewport.name = "HealthBarViewport"
+		viewport.transparent_bg = true
+		viewport.size = Vector2i(140, 22)
+		viewport.render_target_update_mode = SubViewport.UPDATE_ALWAYS
+		add_child(viewport)
+
+		var bar: ProgressBar = ProgressBar.new()
+		bar.name = "ProgressBar"
+		bar.custom_minimum_size = Vector2(140, 22)
+		bar.anchors_preset = Control.PRESET_FULL_RECT
+		bar.show_percentage = true
+		bar.max_value = max_hp
+		bar.value = current_hp
+		viewport.add_child(bar)
+		progress_bar = bar
+	else:
+		viewport.render_target_update_mode = SubViewport.UPDATE_ALWAYS
+		viewport.transparent_bg = true
+		if not progress_bar and viewport.has_node("ProgressBar"):
+			progress_bar = viewport.get_node("ProgressBar") as ProgressBar
+
+	if not health_bar_sprite:
+		health_bar_sprite = get_node_or_null("HealthBarSprite") as Sprite3D
+	if not health_bar_sprite:
+		health_bar_sprite = Sprite3D.new()
+		health_bar_sprite.name = "HealthBarSprite"
+		add_child(health_bar_sprite)
+
+	health_bar_sprite.position = Vector3(0, 2.65, 0)
+	health_bar_sprite.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+	health_bar_sprite.no_depth_test = true
+	health_bar_sprite.render_priority = 10
+	health_bar_sprite.pixel_size = 0.008
+	health_bar_sprite.texture = viewport.get_texture()
+	health_bar_sprite.visible = true
+
+	if progress_bar:
+		var fill_style: StyleBox = progress_bar.get_theme_stylebox("fill")
+		if fill_style:
+			progress_bar.add_theme_stylebox_override("fill", fill_style.duplicate())
 
 
 func _process(delta: float) -> void:
@@ -167,10 +245,16 @@ func _on_health_changed(new_health: float, max_hp: float) -> void:
 
 
 func _on_died() -> void:
+	if frost:
+		frost.clear()
+	if polymorph:
+		polymorph.clear()
 	if _hit_tween and _hit_tween.is_valid():
 		_hit_tween.kill()
 	if _mesh_material:
 		_mesh_material.albedo_color = defeated_color
+
+	_update_health_bar(0.0, max_hp)
 
 	if auto_reset_on_death:
 		if _reset_tween and _reset_tween.is_valid():
@@ -181,6 +265,10 @@ func _on_died() -> void:
 
 
 func reset_dummy() -> void:
+	if frost:
+		frost.clear()
+	if polymorph:
+		polymorph.clear()
 	if _reset_tween and _reset_tween.is_valid():
 		_reset_tween.kill()
 	if _hit_tween and _hit_tween.is_valid():
@@ -205,6 +293,8 @@ func reset_dummy() -> void:
 	if _mesh_material:
 		_mesh_material.albedo_color = normal_color
 
+	respawned.emit()
+
 
 var is_flashing_hit: bool:
 	get:
@@ -226,10 +316,21 @@ func _flash_hit_effect() -> void:
 	_hit_tween.tween_property(_mesh_material, "albedo_color", normal_color, 0.18)
 
 
-func _update_health_bar(current: float, max_hp: float) -> void:
-	if progress_bar:
-		progress_bar.max_value = max_hp
-		progress_bar.value = current
+func _update_health_bar(current: float, max_hp_val: float) -> void:
+	if not progress_bar:
+		return
+	progress_bar.max_value = max_hp_val
+	progress_bar.value = clampf(current, 0.0, max_hp_val)
+
+	var ratio: float = current / max_hp_val if max_hp_val > 0.0 else 0.0
+	var fill_style: StyleBoxFlat = progress_bar.get_theme_stylebox("fill") as StyleBoxFlat
+	if fill_style:
+		if ratio > 0.5:
+			fill_style.bg_color = Color(0.2, 0.85, 0.35, 1.0)
+		elif ratio > 0.25:
+			fill_style.bg_color = Color(0.95, 0.75, 0.2, 1.0)
+		else:
+			fill_style.bg_color = Color(0.9, 0.25, 0.2, 1.0)
 
 
 func _setup_material() -> void:

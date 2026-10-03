@@ -2,114 +2,168 @@ extends SceneTree
 
 var _failures: int = 0
 var _passes: int = 0
+var _budget: int = 1600
+var arena: Node3D
+var p: PlayerController
+var dummy: TrainingDummy
 
 
-func _init() -> void:
-	print("==================================================")
-	print("RUNNING TASK 5.15E: ABILITY SYSTEM & HERO SKILLS TEST")
-	print("==================================================")
+func _initialize() -> void:
 	call_deferred("_run_all_tests")
+	physics_frame.connect(func() -> void:
+		_budget -= 1
+		if _budget <= 0:
+			push_error("Ability integration timed out")
+			quit(1)
+	)
 
 
 func assert_true(cond: bool, msg: String) -> void:
 	if cond:
 		_passes += 1
-		print("[PASS] %s" % msg)
+		print("[PASS] " + msg)
 	else:
 		_failures += 1
-		print("[FAIL] %s" % msg)
+		push_error("[FAIL] " + msg)
+
+
+func _step(count: int = 1) -> void:
+	for frame: int in range(count):
+		await physics_frame
+		await process_frame
+
+
+func _input(action: StringName, pressed: bool) -> void:
+	var event: InputEventAction = InputEventAction.new()
+	event.action = action
+	event.pressed = pressed
+	event.strength = 1.0 if pressed else 0.0
+	Input.parse_input_event(event)
+	Input.flush_buffered_events()
+
+
+func _reset_scenario() -> void:
+	for action: StringName in [&"attack", &"skill_1", &"skill_2", &"skill_3", &"ultimate"]:
+		_input(action, false)
+	p.respawn(Vector3(0, 0.1, 0))
+	p._camera_yaw = 0
+	p._camera_pitch = 0
+	dummy.global_position = Vector3(0, 0, -2)
+	dummy.health_component.current_health = 100
+	await _step(4)
+	p.stamina_component.current_stamina = 100
+
+
+func _wait_finished() -> bool:
+	for frame: int in range(300):
+		if p.active_ability_action == null:
+			return true
+		await _step()
+	assert_true(false, "Ability must naturally finish within its bounded lifecycle")
+	return false
 
 
 func _run_all_tests() -> void:
-	var arena_scene: PackedScene = load("res://scenes/CombatTestArena.tscn")
-	var arena: Node3D = arena_scene.instantiate()
+	# Isolated floor avoids unrelated arena attacker AI changing HP/stamina.
+	arena = Node3D.new()
 	root.add_child(arena)
-	await process_frame
-	await process_frame
-
-	var p: PlayerController = arena.find_child("Player", true, false) as PlayerController
-	assert_true(p != null and p.ability_system != null, "TEST 1: Player and AbilitySystem initialized")
-
+	var floor_body: StaticBody3D = StaticBody3D.new()
+	var floor_shape: CollisionShape3D = CollisionShape3D.new()
+	var floor_box: BoxShape3D = BoxShape3D.new()
+	floor_box.size = Vector3(60, 1, 60)
+	floor_shape.shape = floor_box
+	floor_body.position.y = -0.5
+	floor_body.add_child(floor_shape)
+	arena.add_child(floor_body)
+	p = load("res://scenes/Player.tscn").instantiate() as PlayerController
+	arena.add_child(p)
+	dummy = load("res://scenes/TrainingDummy.tscn").instantiate() as TrainingDummy
+	arena.add_child(dummy)
+	await _reset_scenario()
+	assert_true(p.ability_system != null, "Knight AbilitySystem initialized")
 	var asys: AbilitySystem = p.ability_system
 	var sc: StaminaComponent = p.stamina_component
-	var dummy: TrainingDummy = arena.find_child("TrainingDummy", true, false) as TrainingDummy
-	if dummy:
-		dummy.global_position = p.global_position + Vector3(0, 0, -2.0)
-	await process_frame
-	await physics_frame
-
-	# 1. Prototype skill definitions check
-	var s1: AbilityData = asys.get_ability("skill_1")
-	var s2: AbilityData = asys.get_ability("skill_2")
-	var s3: AbilityData = asys.get_ability("skill_3")
-	var ult: AbilityData = asys.get_ability("ultimate")
-
-	assert_true(s1 != null and s1.damage == 35.0 and s1.stamina_cost == 20.0 and s1.cooldown == 3.0, "TEST 2: Skill 1 (Thrust) configured correctly")
-	assert_true(s2 != null and s2.damage == 20.0 and s2.stamina_cost == 25.0 and s2.cooldown == 4.0, "TEST 3: Skill 2 (Shield Bash) configured correctly")
-	assert_true(s3 != null and s3.damage == 40.0 and s3.stamina_cost == 35.0 and s3.cooldown == 6.0, "TEST 4: Skill 3 (Whirlwind AoE) configured correctly")
-	assert_true(ult != null and ult.damage == 100.0 and ult.requires_full_stamina and ult.cooldown == 0.0, "TEST 5: Ultimate (Judgment Blade) configured correctly")
-
-	# 2. Skill 1 Casting & Damage
-	sc.current_stamina = 50.0
-	var dummy_hp_before: float = dummy.health_component.current_health
-	var cast_s1: bool = p._try_cast_ability("skill_1")
-	assert_true(cast_s1, "TEST 6: Skill 1 cast via PlayerController")
-	assert_true(asys.get_cooldown_remaining("skill_1") > 2.5, "TEST 7: Skill 1 triggered its 3.0s cooldown")
-	assert_true(dummy.health_component.current_health == dummy_hp_before - s1.damage, "TEST 8: Skill 1 dealt 35 damage to target")
-
-	# 3. Independent Cooldowns: Skill 2, 3 and Ult cooldowns remain 0.0
-	assert_true(asys.get_cooldown_remaining("skill_2") == 0.0, "TEST 9: Skill 2 unaffected by Skill 1 cooldown")
-	assert_true(asys.get_cooldown_remaining("skill_3") == 0.0, "TEST 10: Skill 3 unaffected by Skill 1 cooldown")
-
-	# Skill 1 spam rejection during cooldown
-	var cast_s1_spam: bool = p._try_cast_ability("skill_1")
-	assert_true(not cast_s1_spam, "TEST 11: Skill 1 rejected while on cooldown")
-
-	# 4. Skill 2 Casting (Shield Bash & shield recovery)
-	sc.current_stamina = 50.0
-	p.shield_durability = 50.0
-	dummy_hp_before = dummy.health_component.current_health
-	var cast_s2: bool = p._try_cast_ability("skill_2")
-	assert_true(cast_s2, "TEST 12: Skill 2 cast successfully")
-	assert_true(dummy.health_component.current_health == dummy_hp_before - s2.damage, "TEST 13: Skill 2 dealt 20 damage")
-	assert_true(p.shield_durability == 75.0, "TEST 14: Skill 2 restored 25 shield durability")
-
-	# 5. Skill 3 Area Casting (Whirlwind)
-	sc.current_stamina = 50.0
-	dummy_hp_before = dummy.health_component.current_health
-	var cast_s3: bool = p._try_cast_ability("skill_3")
-	assert_true(cast_s3, "TEST 15: Skill 3 cast successfully")
-	assert_true(dummy.health_component.current_health == dummy_hp_before - s3.damage, "TEST 16: Skill 3 dealt 40 AoE damage")
-
-	# 6. Ultimate Casting (Requires 100 stamina)
-	sc.current_stamina = 90.0
-	var ult_low_stamina: bool = p._try_cast_ability("ultimate")
-	assert_true(not ult_low_stamina, "TEST 17: Ultimate rejected when stamina < 100")
-
-	sc.current_stamina = 100.0
-	dummy.health_component.current_health = 100.0
-	dummy_hp_before = dummy.health_component.current_health
-	var ult_full_stamina: bool = p._try_cast_ability("ultimate")
-	assert_true(ult_full_stamina, "TEST 18: Ultimate cast successfully at 100 stamina")
-	assert_true(sc.current_stamina == 0.0, "TEST 19: Ultimate consumed all stamina")
-	assert_true(dummy.health_component.current_health == dummy_hp_before - ult.damage, "TEST 20: Ultimate dealt 100 damage")
-
-	# 7. Recovery lockouts: Finisher recovery forbids skills
+	var z: AbilityData = asys.get_ability("skill_1")
+	var x: AbilityData = asys.get_ability("skill_2")
+	var c: AbilityData = asys.get_ability("skill_3")
+	var v: AbilityData = asys.get_ability("ultimate")
+	assert_true(z.id == "shield_charge" and z.damage == 25 and z.stamina_cost == 20 and z.cooldown == 4, "Z is Shield Charge: 25 damage / 20 stamina / 4s cooldown")
+	assert_true(x.id == "sky_dive" and x.damage == 35 and x.stamina_cost == 25 and x.cooldown == 6, "X is Sky Dive: 35 damage / 25 stamina / 6s cooldown")
+	assert_true(c.id == "whirling_blade" and c.damage == 30 and c.stamina_cost == 30 and c.cooldown == 5, "C is Whirling Blade: 30 damage / 30 stamina / 5s cooldown")
+	assert_true(v.id == "giant_sword_ultimate" and v.damage == 90 and v.requires_full_stamina and v.stamina_cost == 100 and v.cooldown == 0, "V is targeted Giant Sword: 90 damage / full stamina / no cooldown")
+	_input("skill_1", true)
+	await _step()
+	assert_true(p.active_ability_action != null and sc.current_stamina == 80, "Z input starts action and spends 20 once")
+	assert_true(asys.get_cooldown_remaining("skill_1") > 3.9, "Z starts its 4s cooldown")
+	assert_true(dummy.current_hp == 100, "Z does not damage during startup")
+	assert_true(asys.get_cooldown_remaining("skill_2") == 0 and asys.get_cooldown_remaining("skill_3") == 0 and asys.get_cooldown_remaining("ultimate") == 0, "Z cooldown does not affect other slots")
+	assert_true(not p._try_cast_ability("skill_2") and sc.current_stamina == 80, "Active Z rejects another skill without spending")
+	if not await _wait_finished():
+		quit(1)
+		return
+	assert_true(dummy.current_hp == 75 and sc.current_stamina == 80, "Z impact deals 25 once without stamina refund")
+	assert_true(not p._try_cast_ability("skill_1") and sc.current_stamina == 80, "Z cooldown still rejects cast after recovery")
+	await _reset_scenario()
+	p.shield_durability = 50
+	p._camera_pitch = deg_to_rad(-80)
+	_input("skill_2", true)
+	await _step()
+	assert_true(p.active_ability_action != null and sc.current_stamina == 75 and asys.get_cooldown_remaining("skill_2") > 5.9, "X input spends 25 and starts 6s cooldown")
+	for frame: int in range(120):
+		if p._sky_dive_sub_phase == 2:
+			break
+		await _step()
+	assert_true(p._sky_dive_sub_phase == 2 and dummy.current_hp == 100, "X reaches aerial aim without early damage")
+	await _step(5)
+	assert_true(p._sky_dive_sub_phase == 2, "X waits for a fresh LMB confirmation")
+	_input("attack", true)
+	await _step()
+	_input("attack", false)
+	if not await _wait_finished():
+		quit(1)
+		return
+	assert_true(dummy.current_hp == 65 and p.is_on_floor(), "X deals 35 on physical landing and finishes recovery")
+	assert_true(p.shield_durability == 50, "Sky Dive does not inherit prototype Shield Bash repair")
+	await _reset_scenario()
+	_input("skill_3", true)
+	await _step()
+	assert_true(p.active_ability_action != null and sc.current_stamina == 70 and asys.get_cooldown_remaining("skill_3") > 4.9, "C input spends 30 and starts 5s cooldown")
+	assert_true(dummy.current_hp == 100, "C startup causes no early damage")
+	if not await _wait_finished():
+		quit(1)
+		return
+	assert_true(dummy.current_hp == 70 and sc.current_stamina == 70, "C deals 30 once through ACTIVE and recovery")
+	await _reset_scenario()
+	sc.current_stamina = 99
+	assert_true(not p._try_cast_ability("ultimate") and sc.current_stamina == 99, "V rejects partial stamina without spending")
+	sc.current_stamina = 100
+	_input("ultimate", true)
+	await _step(35)
+	assert_true(p.giant_sword_ultimate.aiming and sc.current_stamina == 0 and dummy.current_hp == 100, "V reserves 100 and waits for ground selection without damage")
+	var click: InputEventMouseButton = InputEventMouseButton.new()
+	click.button_index = MOUSE_BUTTON_LEFT
+	click.position = p.giant_sword_ultimate.cinematic_camera.unproject_position(Vector3(0, 0, -2))
+	click.pressed = true
+	Input.parse_input_event(click)
+	Input.flush_buffered_events()
+	await _step()
+	click.pressed = false
+	Input.parse_input_event(click)
+	Input.flush_buffered_events()
+	assert_true(not p.giant_sword_ultimate.aiming and p.active_ability_action.custom_data["impact_origin"].distance_to(Vector3(0, 0, -2)) < 0.05, "LMB ray commits the selected ground point")
+	await _step(40)
+	assert_true(dummy.current_hp == 100, "V has no damage before sword reaches the ground")
+	if not await _wait_finished():
+		quit(1)
+		return
+	assert_true(dummy.current_hp == 10 and sc.current_stamina == 0, "Selected V impact deals 90 once without stamina reward")
+	assert_true(p.camera.current and not p.combat.giant_sword_vfx.visible and p._is_mouse_captured, "V completion restores camera/cursor and removes effects")
+	await _reset_scenario()
 	p._combo_finisher_recovery_timer = 0.5
-	sc.current_stamina = 100.0
-	asys.reset_cooldowns()
-	var cast_during_finisher: bool = p._try_cast_ability("skill_1")
-	assert_true(not cast_during_finisher, "TEST 21: Skills strictly forbidden during finisher recovery")
-	p._combo_finisher_recovery_timer = 0.0
-
-	# 8. Dead state forbids skills
+	assert_true(not p._try_cast_ability("skill_1") and not p._try_cast_ability("ultimate") and sc.current_stamina == 100, "Finisher recovery rejects abilities without spending")
+	p._combo_finisher_recovery_timer = 0
 	p.transition_to(PlayerController.CombatState.DEAD)
-	var cast_when_dead: bool = p._try_cast_ability("skill_1")
-	assert_true(not cast_when_dead, "TEST 22: Skills strictly forbidden when DEAD")
-
+	assert_true(not p._try_cast_ability("skill_1") and not p._try_cast_ability("ultimate"), "DEAD rejects skills and ultimate")
 	arena.queue_free()
-
-	print("==================================================")
 	print("RESULTS: %d / %d PASSED (%d FAILED)" % [_passes, _passes + _failures, _failures])
-	print("==================================================")
 	quit(0 if _failures == 0 else 1)

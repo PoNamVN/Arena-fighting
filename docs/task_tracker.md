@@ -1,5 +1,254 @@
 # Task Tracker & Roadmap
 
+## Latest checkpoint — 2026-10-03: Combat spectacle for all three heroes
+
+User requested a much stronger animation/VFX upgrade with performance kept in mind.
+Implemented Knight body anticipation/C arcs/giant-sword rune-wake-impact, Archer
+smooth cached two-bone bow poses/recoil/batched spiral trails and synchronized T-rex
+bite effects, Wizard animated fireball/sigils/channel pose/two-layer batched lightning.
+CombatSpectacle uses6 fixed burst slots,2 wave planes+24 batched sparks each;
+world-fixed,0.75s lifetime, no physics/gameplay changes, idle sleeping and round cleanup.
+Arrow28 segments ->1 MultiMesh; sword32 debris ->1 MultiMesh; lightning24 segments
+->2 MultiMeshes. Magic/cloud/debris shadows off; physical shadows retained.
+Full50/50 suites passed, then final affected Knight/Archer/Wizard suites rerun PASS.
+Targeted23/23 headless and OpenGL PASS; final renderer stderr empty. Six-slot CPU microbenchmark~0.4–0.5ms,
+not a full-match FPS guarantee. Runner now51 suites. See combat_spectacle.md for
+complete budgets, validation logs and limitations. Models remain draft; user feel/FPS
+playtest needed before further expansion.
+
+
+## Previous checkpoint — 2026-10-03: Wizard presentation polish
+
+User approved beginning visual/animation polish with performance in mind.
+- Added WizardPresentation: separate visual-only arm/staff poses for charge,
+  release/Counter, guard, giant staff warning/fall, hex, ice glide and storm channel.
+  Exponential blend, cached6 bone indices/rests, correct imported rig axes,
+  forearm continuity and wooden staff grip following actual hand endpoint.
+  Stops/clears on hit, polymorph/freeze, death/reset/round lock.
+- Three pre-created reusable meshes: palm rune, ice/storm ground aura, staff glow.
+  Ring geometry shared; materials cached; effects hidden when unused. No spawning
+  inside presentation update, no new physics queries/colliders, no gameplay tuning.
+  Magical orbs, shields, runes and beams no longer cast unnecessary shadows;
+  physical staff and terrain retain shadows.
+- Targeted26/26 headless and OpenGL PASS; foundation44/44 headless/OpenGL,
+  Z/X46/46 and C/V67/67 headless PASS; model/map isolation17/17 PASS.
+  Syntax exit0 and diff clean. Final renderer after shadow cleanup26/26 PASS,
+  stderr empty (scratch/wizard_polish_final_render.log).
+  Presentation microbenchmark ~0.02ms/update for1000 updates on this host;
+  this measures CPU presentation only, not complete-match FPS or low-end hardware.
+  Full49-suite pass belongs to previous C/V milestone; runner now includes50 suites.
+- Viewed actual charge, guard, staff, hex, ice and storm frames. Model remains draft;
+  new casting motion/game feel needs user playtest. Next polish: Knight and Archer,
+  then three-hero balancing and AI before complete-match rules.
+
+
+
+## Previous checkpoint — 2026-10-03: Wizard C/V
+
+User accepted foundation and Z/X; implemented the remaining Wizard skills.
+V follow-up: sky/light/clouds fade in over first1s and out over last1s of the5s
+channel. Original sky mode retained; targeted67/67 headless/OpenGL PASS, renderer
+stderr empty (scratch/wizard_storm_fade_render.log).
+- C: held aimed ice glide,15 energy start +15/s,10s cooldown,10m/s,3s maximum.
+  Upward aim builds solid ice ramps up to5m above start; tiles stay fixed in world,
+  expire after4s and cap at55. Release/wall/hit/depletion stops movement.
+- Contact freezes enemies0.8s and stops glide; guard/i-frame prevent CC. Frozen
+  actors cannot move/fight or ride caster platforms. X/C share2s expiry resistance;
+  cannot chain active CC. Death/reset/round exit restores platform layers and clears ice.
+- V: full100 energy, zoomed mouse selection within24m/radius7, valid ground/LOS;
+  fresh LMB after camera transition confirms, Esc/hit/8s timeout cancels free aim.
+  Five-second stationary dark-sky channel,20 random warned lightning strikes,
+  warning0.32s/radius2/damage24/shield20, normal guard/PD and roof LOS, no energy farm.
+- Spherical shield blocks all damage, shield damage, knockback and CC during channel,
+  including direct HealthComponent damage. Training invulnerability stays independent.
+  Camera/cursor/environment/light restored and all effects cleared on finish/round exit.
+- C/V targeted62/62 headless and OpenGL Compatibility PASS; renderer stderr empty.
+  Full49/49 regression suites PASS, exit0, no SCRIPT/parse errors; syntax exit0,
+  diff check clean. Active scene teardown and actual practice results restore cursor.
+  Viewed actual ice mountain/storm frames. Logs: scratch/wizard_cv_exit_test.log,
+  wizard_cv_verified_render.log, wizard_cv_full_regression.log.
+  Headless retains known dummy-renderer null-mesh teardown noise only.
+  Previous foundation/Z/X playtests accepted. New C/V game feel still needs user playtest.
+
+## Previous checkpoint — 2026-10-03: Wizard Z/X
+
+User accepted Wizard foundation and authorized the next milestone. Z/X implemented;
+C held ice glide/mountain and V immune-channel lightning storm remain unimplemented.
+
+- Z Đại trượng:30 energy/7s, fixed facing, 12.3m x2m strip,0.8s visible outline
+  and growth then0.42s fall, one38 damage/30 shield impact. Unblocked living Player
+  pushed1.4m. World wall clips the warning/model length and LOS excludes targets
+  behind walls. Dust/deep impact audio, shrink cleanup. Hit/Q/guard/Esc can interrupt;
+  no refund. Cannot overlap basic/X/Counter; slow casting movement.
+- X Hóa gà:25 energy/9s,0.22s startup, physical purple beam26m/s/radius0.12/24m.
+  Visible-target autoaim at commitment or free aim; fixed trajectory afterwards.
+  Front guard costs15 shield and prevents transformation; real i-frame opens PD.
+  No HP damage, no basic energy reward. Hit/Q/guard/Esc cancels startup, no refund.
+- PolymorphEffect attached to PlayerController and TrainingDummy:1.5s chicken,
+  original visual children hidden/restored, timer label and magic puff. Movement
+  remains available; attack/guard/dodge/skills/jump blocked. Cancels pending combo/
+  ability/Counter/dodge and Archer/Wizard casts; keeps HP/body collider/targetability.
+  Chicken can take damage. Active transform cannot refresh;2s resistance on expiry.
+  Practice AI retreats, cancels queued warning before snapshot, resumes after expiry.
+  Death/dummy reset/new round/scene exit clear effect and resistance.
+- Chicken GLB:864 triangles, one mesh/node, original palette and editable source,
+  export active selected isolated scene, no arena or third-party assets.
+- Targeted initial38/38 headless and OpenGL PASS; expanded46/46 headless PASS.
+  Final46/46 headless and OpenGL PASS; renderer stderr empty. Full48/48 suites PASS,
+  all exit0, no SCRIPT/parse errors (scratch/wizard_zx_full_regression.log).
+  Final syntax exit0/diff clean; headless has known dummy-renderer null-mesh noise only.
+  Viewed actual Godot warning/fall frames; Blender asset checked clean864 triangles/1 node.
+  User playtest pending for Z timing and X readability.
+
+
+## Latest checkpoint — 2026-10-03: Wizard foundation
+
+User accepted Archer and the instruction-text cleanup. Wizard kit design agreed:
+elder elemental wizard with branch staff; charged autoaim fireball, giant falling
+staff Z, chicken polymorph X, held aimed ice glide/mountain C, targeted 5s
+random lightning V with a full-damage-immunity sphere during channeling.
+Current authorized milestone implements only the character/basic/guard/Counter;
+Z/X/C/V are explicitly unavailable and marked in development.
+
+- Separate WizardCombat, selected_hero="wizard", Arena Test third selector item;
+  Practice/replay/return preserve selection, opponent stays Knight.
+- Charge 1.6s, 24m, 10–34 damage, 18–28m/s, swept sphere radius 0.12–0.42m.
+  Slow to 55% movement; cap, release one shot; front55-degree visible live autoaim.
+  Splash0–1.5m does half damage, world LOS, caster excluded, primary not hit twice;
+  one15-energy award for each successful basic projectile, no skill energy farming.
+- RMB75% front guard, shared100 durability/break/recovery; no immunity from normal guard.
+- Q shared Perfect Dodge; fresh LMB Counter45 damage/20 shield/40m/s/24m,
+  3.2m retreat in0.32s with wall collision; consumes window and prior i-frame.
+- Esc/hit/guard/dodge interrupts charge; death/round reset cleans projectiles,
+  particles/audio/poses. Future spells do not fall through to Knight ability logic.
+- Low-poly model627 triangles/25 nodes/18 bones, idle/run/dead; staff118/2 nodes.
+  Separate editable Blender source, clean selection+active-scene export, no map meshes.
+- Full agreed design and milestone tuning: docs/wizard_design.md.
+- Verified: full47/47 regression suites PASS, all exit0, no SCRIPT/parse errors
+  (scratch/wizard_full_regression.log); Wizard44/44 headless and OpenGL PASS
+  (scratch/wizard_verified_headless.log, wizard_verified_render.log), renderer stderr empty.
+  Final syntax exit0; git diff --check clean apart from existing LF/CRLF notices.
+  Headless retains known dummy-renderer null-mesh noise; real renderer has none.
+  Initial render43/44 splash fixture failure retained in wizard_final_render.log;
+  diagnostic44/44 and final44/44 pass. Charge fixture now waits actual cap and resets
+  time scale between actors. User playtest remains required for feel and draft visuals.
+
+
+Workflow cho các đợt tiếp theo: [Nâng chất lượng game](development_workflow.md).
+
+## Current development checkpoint (2026-10-03)
+
+- Map attached to/duplicated under Player: asset fixed, isolation 17/17,
+  user manually tested and reported working.
+- Knight C — Whirling Blade: IMPLEMENTED / USER ACCEPTED (2026-10-02). Existing
+  30 damage / 3m / 30 stamina / 5s tuning; authored spin clip and reusable VFX;
+  phase-controlled AOE through shared damage APIs; targeted suite 52/52.
+- Knight V — targeted colossal sword: IMPLEMENTED / USER ACCEPTED (2026-10-02).
+  24.5m opaque sword, zoom-out camera and fresh LMB ground selection (24m),
+  clouds/descent/slam/shake/debris/dissolve. 100 stamina / 90 damage / 4.5m;
+  fall 1.40s, active 0.20s, recovery 2.0s. V targeted 60/60; latest regression recorded below.
+- Legacy ability tests: 5.15E 28/28, 5.15F 49/49. Resolved remaining TPS/RMB/
+  shield KNOWN groups; normal BLOCK -> attack fixed. Broken shield lockout retained.
+- Practice duel: IMPLEMENTED / USER ACCEPTED (2026-10-03).
+  Entry button, environment-only arena + one mobile AI, 3–2–1 intro,
+  90s timer, 200 HP, win/loss/draw, replay/return. New suites 27/27 + 11/11.
+- Arena Test tools: IMPLEMENTED / USER ACCEPTED.
+  F1 infinite energy; F2 no cooldown; F3 HP invulnerability; F4 full room reset.
+  Default OFF, restricted to Arena Test. Prior accepted skill/map behavior retained.
+- AI difficulty upgrade: IMPLEMENTED / USER ACCEPTED (2026-10-03).
+  Easy/Normal/Hard selector, combos1/2/3, delayed block/dodge, C with orange
+  warning and real energy/cooldown. New AI suite27/27, navigation11/11.
+  Final coverage40 suites PASS across full run39PASS and fixture-corrected
+  shield rerun15/15; see AI_HANDOFF for original failure and logs.
+  User confirmed the upgraded game is working. User subsequently chose heroes
+  2/3 before best-of-three; current priority is the forest archer.
+  Older roadmap entries below are historical; consult AI_HANDOFF.
+
+## Forest archer — X triple helix / V T-rex bait (2026-10-03)
+
+- IMPLEMENTED / AWAITING USER PLAYTEST. User accepted previous X/C and explicitly
+  requested spiral X then Ultimate. X now launches3 simultaneous physical helices,
+  120 degrees apart,0.95m radius,2.4 rotations/s; opens then converges. Curved
+  collision/trails;20m/s, same30 energy/8s cooldown/42 max damage.
+- V100 full energy: zoom/select ground24m with fresh LMB, ESC cancels before spend.
+  Physical meat arc, outline2.2m,0.8s tag window; caster excluded, walls respected.
+  Giant T-rex chases marked enemy and bites3x30, else only eats bait. Block,
+  i-frame/Perfect Dodge and escaping mouth work. Wide showcase camera/roar/dust,
+  walking/jaw/crouch, leave/fade; round/death cleanup and match win verified.
+- Original isolated2084-triangle T-rex and128-triangle bait; GLB13/2 nodes clean,
+  editable Blender source retained. Knight/map assets unchanged.
+- Full46/46 suites PASS (Ultimate32 then); final expanded Ultimate37/37 headless
+  and OpenGL PASS, empty stderr; spiral11/11 both renderers, X/C40/40 retained.
+  Final syntax gate exits0, diff --check clean. User validation of feel pending.
+- Next: X/V playtest then Archer/Knight matchup balance.
+
+## Forest archer — X/C (2026-10-03)
+
+- IMPLEMENTED / AWAITING USER PLAYTEST. Guard/Counter USER ACCEPTED.
+- X three seeking arrows:14 damage each,30 energy,8s cooldown; startup0.28s,
+  spacing0.16s,recovery0.35s;23m/s,24m range,110 degrees/s steering.
+  Needs visible front target; locks identity once, no reacquisition. Walls/shields
+  still block,8 shield damage per arrow; no energy from skill hits.
+- C dash5m/0.25s in WASD direction (idle forward), collision with walls;25 energy,
+  10s cooldown,recovery0.20s. Stealth2.5s, leaf burst, readable alpha silhouette.
+  AI loses tracking; attacks/actual damage reveal. No invulnerability.
+  Death/round end fully restores materials/action state. X/C HUD supports F1/F2.
+- New X/C40/40 PASS headless and OpenGL, stderr empty. Related15/15 regression
+  suites PASS. Reviewed FPS/TPS captures; fixed alpha support for GL Compatibility.
+  Runner now44 suites; full44 not rerun this stage (previous full43 passed).
+- Next: playtest X/C, then V bait/T-rex.
+
+## Forest archer — Bow guard and retreat Counter (2026-10-03)
+
+- IMPLEMENTED / AWAITING USER PLAYTEST: RMB horizontal bow guard, front65%
+  mitigation, shared100 durability, rear full damage, depletion stun0.65s.
+  HUD shows bow durability/break; guard cancels charge/Z without refund.
+- Perfect Dodge -> fresh LMB within0.6s: enlarged physical arrow toward attacker,
+  50 damage/20 shield damage,38m/s,24m range; gold trail, no homing.
+  Backward hop3.2m/0.32s stops at walls; recovery0.30s, ends dodge invulnerability,
+  consumes Counter window and grants no basic-shot energy.
+- Defense suite36/36 PASS in actual renderer, empty stderr; full43-suite
+  regression43/43 PASS, exits0; final syntax gate exits0, git diff --check clean.
+  Guard, break, damage, wall/shield, FPS and cleanup covered.
+- Next: user playtest of defensive kit, then X three homing arrows.
+
+## Forest archer — Stage 2: Z rapid volley (2026-10-03)
+
+- IMPLEMENTED / USER ACCEPTED: press Z for6 sequential physical arrows,
+  damage7 each (42 maximum),25 energy,5s cooldown. Startup0.22s, interval0.14s,
+  recovery0.35s; range24m/speed30m/s; movement35% while firing.
+- Aim assist chooses visible target only at cast start. Direction commits, with
+  at most12° steering at25°/s; emitted arrows never home. Repeated Z/LMB cannot
+  overlap volley; Q/RMB/Esc/hit cancel remaining emissions without refund.
+- Each arrow uses actual wall collision, block/i-frame damage APIs. Shield
+  damage5 per arrow (30 maximum); skill hits do not generate basic-shot energy.
+  Round end/death clear emissions and arrows; F1/F2 work in Arena Test.
+- Reuses existing bow/arrow/audio, adds shared green trail resources and cycling
+  bowstring draw pose. HUD shows Z cooldown/cost; X/C/V remain unavailable.
+- Z suite32/32 PASS headless and real renderer (empty stderr). Basic shot44/44
+  remains PASS. Eleven targeted regression suites all PASS: AbilitySystem,
+  combat integration, practice/navigation/AI, Knight Z/X/C/V and map isolation.
+  Full42-suite runner now includes Z; full runner was not repeated this stage.
+- Z accepted; defensive kit added next, then X after playtest.
+
+## Forest archer — Stage 1 (2026-10-03)
+
+- IMPLEMENTED / USER ACCEPTED: selector in Arena Test; separate hunter
+  model/wood bow/arrow; human Archer versus Knight AI with existing countdown.
+- Hold LMB up to1.2s, release one arrow; aim assist24m/front55°/visible living
+  target; fixed flight direction after release. Quick12→full36 damage,
+  speed18→32m/s, range24m, recovery0.4s; temporary tuning for playtest.
+- Swept collision against world and enemy, receiver-owned block/i-frame logic;
+  successful damage grants15 energy; RMB/Esc/hit/dodge cancel charge;
+  death/round end clears projectiles. No Knight block/melee/skills for Archer.
+- Prototype asset budget: character569 tris, bow68, arrow21; original rig18 bones
+  reused with isolated meshes/materials and idle/run/dead clips.
+- Z/X/C/V are visibly unavailable; not implemented in this stage. Next: Z volley,
+  then X homing trio, C dash/invisibility, V meat bait/T-rex as requested.
+- Archer44/44 PASS with real renderer/empty stderr; syntax exit0. Regression
+  coverage41 suites PASS across full37PASS/4 audio-import failures +4 clean reruns.
+  Original failure report retained; details in newest AI_HANDOFF checkpoint.
+
 ## Milestone 0: Environment & Workflow Setup
 - [x] **Audit environment**: Antigravity, Godot 4.3, Blender 5.2 MCP status verified.
 - [x] **Initialize Git repo**: Initialized in `D:\Game 3D\Game_3D` with `.gitignore`.

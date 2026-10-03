@@ -8,6 +8,7 @@ extends Node3D
 @export var core_color: Color = Color(1.0, 1.0, 1.0, 1.0) # Radiant core burst
 @export var energy_color: Color = Color(0.2, 0.55, 1.0, 0.95) # Saturated electric sapphire
 @export var fracture_color: Color = Color(0.7, 0.25, 1.0, 0.85) # High-energy violet fracture fringe
+@export_node_path("Marker3D") var shield_center_socket: NodePath
 
 ## Internal State
 var _tween: Tween
@@ -24,6 +25,8 @@ func _enter_tree() -> void:
 
 
 func _ready() -> void:
+	RenderingServer.frame_pre_draw.connect(_sync_socket_before_draw)
+	process_priority = 200
 	visible = false
 	_setup_meshes_and_materials()
 
@@ -219,6 +222,7 @@ func trigger(break_position: Vector3, normal: Vector3 = Vector3.UP) -> void:
 		global_basis = Basis.looking_at(dir, Vector3.FORWARD)
 	else:
 		global_basis = Basis.looking_at(dir, Vector3.UP)
+	_follow_shield_socket()
 
 	# Clean up any active previous tween to avoid stale accumulation
 	if _tween and _tween.is_valid():
@@ -278,3 +282,23 @@ func stop() -> void:
 		_ring_instance.transparency = 1.0
 	if _shards_instance:
 		_shards_instance.transparency = 1.0
+
+
+func _process(_delta: float) -> void:
+	if visible:
+		_follow_shield_socket()
+
+
+func _follow_shield_socket() -> void:
+	if shield_center_socket.is_empty():
+		return
+	var socket := get_node_or_null(shield_center_socket) as Marker3D
+	if socket:
+		global_position = socket.global_position
+		global_basis = socket.global_basis.orthonormalized()
+
+
+func _sync_socket_before_draw() -> void:
+	# BoneAttachment and recoil tweens finish after the ordinary process pass.
+	if visible:
+		_follow_shield_socket()

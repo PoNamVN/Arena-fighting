@@ -7,6 +7,7 @@ var _arena: Node3D = null
 var _player: PlayerController = null
 var _dummy: TrainingDummy = null
 var _dummy_health: HealthComponent = null
+const SOCKET_TOLERANCE: float = 0.001
 
 
 func _init() -> void:
@@ -52,6 +53,11 @@ func _run_test_suite() -> void:
 	var combat: PlayerCombat = p.combat
 	var block_vfx: Node3D = combat.block_impact_vfx
 	var hit_vfx: Node3D = combat.hit_impact_vfx
+	var shield_socket := p.get_node_or_null("Visuals/CharacterModel/Gladiator_Armature/Skeleton3D/ShieldAttachment/Socket_ShieldCenter") as Marker3D
+	if not shield_socket:
+		_record_result("SETUP: Shield socket existence", false, "Scene Socket_ShieldCenter is missing")
+		quit(1)
+		return
 	
 	if not block_vfx:
 		_record_result("SETUP: BlockImpactVFX existence", false, "combat.block_impact_vfx is null!")
@@ -80,11 +86,13 @@ func _run_test_suite() -> void:
 	
 	var t1_block_shown: bool = false
 	var t1_block_pos: Vector3 = Vector3.ZERO
+	var expected_block_pos: Vector3 = Vector3.ZERO
 	for f in range(60):
 		await process_frame
 		if block_vfx.visible:
 			t1_block_shown = true
 			t1_block_pos = block_vfx.global_position
+			expected_block_pos = shield_socket.global_position
 			break
 			
 	while p._is_attacking or combat._cooldown_timer > 0.0:
@@ -99,12 +107,11 @@ func _run_test_suite() -> void:
 		"VFX triggered=%s" % [t1_block_shown])
 		
 	# Test 2 check: Block Impact appears at shield/contact position
-	# Dummy chest is at (0, 0.9, 0). Attack from North (0, 0, -1.8) towards +Z. Contact point is ~(0, 0.9, -0.35)
-	var expected_block_pos: Vector3 = Vector3(0, 0.9, -0.35)
+	# Compare simultaneous VFX/socket positions while the effect is visible.
 	var dist_to_contact: float = t1_block_pos.distance_to(expected_block_pos)
-	var t2_pass: bool = dist_to_contact < 0.20
+	var t2_pass: bool = t1_block_shown and dist_to_contact < SOCKET_TOLERANCE
 	_record_result("TEST 2: Block Impact appears at shield/contact position", t2_pass,
-		"Block pos=%s (Expected ~%s, dist=%.3fm)" % [t1_block_pos, expected_block_pos, dist_to_contact])
+		"Block pos=%s (ShieldCenter=%s, dist=%.6fm)" % [t1_block_pos, expected_block_pos, dist_to_contact])
 		
 	# Test 3 check: Blocked attack applies reduced damage (3.75)
 	var t3_pass: bool = abs(damage_t1 - 3.75) < 0.05
@@ -154,7 +161,7 @@ func _run_test_suite() -> void:
 	_dummy.rotation = Vector3.ZERO # Faces North (-Z)
 	_dummy.is_blocking = true
 	
-	# Position at 75° angle (outside 120° block cone whose half-angle is 60°)
+	# Position at 75Â° angle (outside 120Â° block cone whose half-angle is 60Â°)
 	var angle_75_rad: float = deg_to_rad(75.0)
 	var flank_pos: Vector3 = Vector3(1.8 * sin(angle_75_rad), 0, -1.8 * cos(angle_75_rad))
 	p.global_position = flank_pos
@@ -294,21 +301,23 @@ func _run_test_suite() -> void:
 	
 	var fps_block_shown: bool = false
 	var fps_block_pos: Vector3 = Vector3.ZERO
+	var expected_fps_block: Vector3 = Vector3.ZERO
 	for f in range(60):
 		await process_frame
 		if block_vfx.visible:
 			fps_block_shown = true
 			fps_block_pos = block_vfx.global_position
+			expected_fps_block = shield_socket.global_position
 			break
 			
 	while p._is_attacking or combat._cooldown_timer > 0.0:
 		await process_frame
 		
 	var damage_t9: float = hp_before_t9 - _dummy_health.current_health
-	var fps_dist: float = fps_block_pos.distance_to(expected_block_pos)
-	var t9_pass: bool = fps_block_shown and (abs(damage_t9 - 3.75) < 0.05) and (fps_dist < 0.20)
+	var fps_dist: float = fps_block_pos.distance_to(expected_fps_block)
+	var t9_pass: bool = fps_block_shown and (abs(damage_t9 - 3.75) < 0.05) and (fps_dist < SOCKET_TOLERANCE)
 	_record_result("TEST 9: FPS block works", t9_pass,
-		"FPS block shown=%s, pos=%s (dist=%.3fm), Damage=%.2f" % [fps_block_shown, fps_block_pos, fps_dist, damage_t9])
+		"FPS block shown=%s, pos=%s (socket dist=%.6fm), Damage=%.2f" % [fps_block_shown, fps_block_pos, fps_dist, damage_t9])
 
 	# -----------------------------------------------------------------
 	# TEST 10: TPS block works
@@ -331,23 +340,24 @@ func _run_test_suite() -> void:
 	
 	var tps_block_shown: bool = false
 	var tps_block_pos: Vector3 = Vector3.ZERO
+	var expected_tps_block: Vector3 = Vector3.ZERO
 	for f in range(60):
 		await process_frame
 		if block_vfx.visible:
 			tps_block_shown = true
 			tps_block_pos = block_vfx.global_position
+			expected_tps_block = shield_socket.global_position
 			break
 			
 	while p._is_attacking or combat._cooldown_timer > 0.0:
 		await process_frame
 		
 	var damage_t10: float = hp_before_t10 - _dummy_health.current_health
-	# Contact point is at (0.35, 0.9, 0)
-	var expected_tps_block: Vector3 = Vector3(0.35, 0.9, 0)
+	# TPS uses the same scene socket after actor rotation.
 	var tps_dist: float = tps_block_pos.distance_to(expected_tps_block)
-	var t10_pass: bool = tps_block_shown and (abs(damage_t10 - 3.75) < 0.05) and (tps_dist < 0.20)
+	var t10_pass: bool = tps_block_shown and (abs(damage_t10 - 3.75) < 0.05) and (tps_dist < SOCKET_TOLERANCE)
 	_record_result("TEST 10: TPS block works", t10_pass,
-		"TPS block shown=%s, pos=%s (dist=%.3fm), Damage=%.2f" % [tps_block_shown, tps_block_pos, tps_dist, damage_t10])
+		"TPS block shown=%s, pos=%s (socket dist=%.6fm), Damage=%.2f" % [tps_block_shown, tps_block_pos, tps_dist, damage_t10])
 
 	# -----------------------------------------------------------------
 	# EVALUATION SUMMARY

@@ -1,0 +1,16 @@
+[gd_resource type="Resource" load_steps=5 format=3]
+
+[ext_resource type="Script" path="res://scripts/vfx/VFXLibrary.gd" id="1"]
+[ext_resource type="Script" path="res://scripts/vfx/VFXDefinition.gd" id="2"]
+[ext_resource type="PackedScene" path="res://vfx/shared/pool_probe.tscn" id="3"]
+
+[sub_resource type="Resource" id="Probe"]
+script = ExtResource("2")
+effect_name = &"framework_probe"
+scene = ExtResource("3")
+pool_size = 8
+duration = 0.4
+
+[resource]
+script = ExtResource("1")
+definitions = Array[ExtResource("2")]([SubResource("Probe")])

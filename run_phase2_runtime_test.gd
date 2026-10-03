@@ -24,6 +24,7 @@ func _run_tests() -> void:
 	
 	# Wait for physics frames to settle
 	for i in range(10):
+		await physics_frame
 		await process_frame
 		
 	print("\n>>> INITIAL STATE:")
@@ -44,9 +45,11 @@ func _run_tests() -> void:
 	# -----------------------------------------------------------------
 	print("\n--- TEST 1: DAMAGE TIMING DURING ATTACK (WIND-UP -> IMPACT -> RECOVERY) ---")
 	player.set_third_person(false) # First-Person
+	await physics_frame
 	await process_frame
 	
 	# Trigger attack
+	await _wait_attack_ready(player)
 	player._try_combat_attack()
 	print("Attack initiated. is_attacking = ", player._is_attacking)
 	
@@ -58,6 +61,7 @@ func _run_tests() -> void:
 	# Simulate 60 physics frames (~1.0 second)
 	for f in range(60):
 		# Let engine process frame
+		await physics_frame
 		await process_frame
 		var anim_pos: float = player.anim_player.current_animation_position if player.anim_player else 0.0
 		var current_hp: float = dummy_health.current_health
@@ -104,6 +108,7 @@ func _run_tests() -> void:
 	
 	# Wait for cooldown to expire
 	while player.combat._cooldown_timer > 0.0:
+		await physics_frame
 		await process_frame
 		
 	print("Cooldown expired. Ready for second attack.")
@@ -115,12 +120,15 @@ func _run_tests() -> void:
 	player.global_position = dummy.global_position + Vector3(0, 0, 3.5) # 3.5m away (beyond 2.2m)
 	player._camera_yaw = 0.0
 	player.visuals.rotation.y = 0.0
+	await physics_frame
 	await process_frame
 	
 	var hp_before_miss: float = dummy_health.current_health
+	await _wait_attack_ready(player)
 	player._try_combat_attack()
 	print("Attacking from 3.5m (out of reach)...")
 	for f in range(50):
+		await physics_frame
 		await process_frame
 		if not player._is_attacking:
 			break
@@ -140,12 +148,15 @@ func _run_tests() -> void:
 	player._camera_yaw = deg_to_rad(180.0) # Facing South (away from dummy to North)
 	player.camera_pivot.rotation.y = deg_to_rad(180.0)
 	player.visuals.rotation.y = deg_to_rad(180.0)
+	await physics_frame
 	await process_frame
 	
 	var hp_before_wrong_dir: float = dummy_health.current_health
+	await _wait_attack_ready(player)
 	player._try_combat_attack()
 	print("Attacking while facing away from dummy...")
 	for f in range(50):
+		await physics_frame
 		await process_frame
 		if not player._is_attacking:
 			break
@@ -166,12 +177,15 @@ func _run_tests() -> void:
 	player._camera_yaw = 0.0
 	player.camera_pivot.rotation = Vector3.ZERO
 	player.visuals.rotation.y = 0.0
+	await physics_frame
 	await process_frame
 	
 	var hp_before_tps: float = dummy_health.current_health
+	await _wait_attack_ready(player)
 	player._try_combat_attack()
 	print("Attacking in Third-Person mode...")
 	for f in range(60):
+		await physics_frame
 		await process_frame
 		if f == 18:
 			_capture_screenshot("phase2_tps_attack_swing.png")
@@ -197,3 +211,12 @@ func _capture_screenshot(filename: String) -> void:
 		var path: String = "d:/Game 3D/Game_3D/" + filename
 		img.save_png(path)
 		print("Saved screenshot: ", path)
+
+
+func _wait_attack_ready(player: PlayerController) -> void:
+	# Each range/facing case is a new swing, not a chained finisher recovery.
+	for i: int in range(180):
+		if not player.is_attacking and player.combo_finisher_recovery_remaining <= 0.0 and player.combat.can_attack():
+			return
+		await physics_frame
+		await process_frame

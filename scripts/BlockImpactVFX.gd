@@ -8,6 +8,7 @@ extends Node3D
 @export var spark_radius: float = 0.40
 @export var core_color: Color = Color(0.9, 0.95, 1.0, 1.0) # Crisp white-cyan core
 @export var glow_color: Color = Color(0.25, 0.65, 1.0, 0.85) # Electric cyan shield energy
+@export_node_path("Marker3D") var shield_center_socket: NodePath
 
 ## Internal State
 var _tween: Tween
@@ -22,6 +23,8 @@ func _enter_tree() -> void:
 
 
 func _ready() -> void:
+	RenderingServer.frame_pre_draw.connect(_sync_socket_before_draw)
+	process_priority = 200
 	visible = false
 	_setup_meshes_and_materials()
 
@@ -161,6 +164,7 @@ func trigger(block_position: Vector3, incoming_direction: Vector3) -> void:
 		global_basis = Basis.looking_at(dir, Vector3.FORWARD)
 	else:
 		global_basis = Basis.looking_at(dir, Vector3.UP)
+	_follow_shield_socket()
 		
 	# Clean up any active previous tween to avoid stale accumulation
 	if _tween and _tween.is_valid():
@@ -208,3 +212,23 @@ func stop() -> void:
 		_flash_instance.transparency = 1.0
 	if _sparks_instance:
 		_sparks_instance.transparency = 1.0
+
+
+func _process(_delta: float) -> void:
+	if visible:
+		_follow_shield_socket()
+
+
+func _follow_shield_socket() -> void:
+	if shield_center_socket.is_empty():
+		return
+	var socket := get_node_or_null(shield_center_socket) as Marker3D
+	if socket:
+		global_position = socket.global_position
+		global_basis = socket.global_basis.orthonormalized()
+
+
+func _sync_socket_before_draw() -> void:
+	# BoneAttachment and recoil tweens finish after the ordinary process pass.
+	if visible:
+		_follow_shield_socket()

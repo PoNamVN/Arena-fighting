@@ -4,6 +4,7 @@ extends RefCounted
 ## Configuration & Metadata
 var damage: float = 25.0
 var attacker_pos: Vector3 = Vector3(99999.0, 99999.0, 99999.0)
+var attacker: Node3D = null
 var incoming_shield_damage: float = 15.0
 var is_dodgeable: bool = true
 var is_perfect_dodge_eligible: bool = true

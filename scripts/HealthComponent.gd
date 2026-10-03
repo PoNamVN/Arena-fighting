@@ -12,6 +12,9 @@ signal died()
 ## State
 var current_health: float = 100.0
 var _is_dead: bool = false
+# Enabled only by the Arena Test controller.
+var ability_invulnerable: bool = false
+var training_invulnerable: bool = false
 
 
 func _ready() -> void:
@@ -21,7 +24,7 @@ func _ready() -> void:
 
 func take_damage(amount: float) -> void:
 	# Ignore non-positive damage (prevents healing or corruption)
-	if amount <= 0.0:
+	if training_invulnerable or ability_invulnerable or amount <= 0.0:
 		return
 	
 	# Ignore damage if already defeated
@@ -42,6 +45,7 @@ func is_dead() -> bool:
 
 
 func reset_health() -> void:
+	ability_invulnerable = false
 	current_health = max_health
 	_is_dead = false
 	health_changed.emit(current_health, max_health)

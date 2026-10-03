@@ -46,6 +46,7 @@ func _run_test_suite() -> void:
 	
 	# Wait for physics / nodes to settle
 	for i in range(10):
+		await physics_frame
 		await process_frame
 		
 	# -------------------------------------------------------------
@@ -60,6 +61,7 @@ func _run_test_suite() -> void:
 	# STEP 2: RMB DOWN -> BLOCK -> block_start
 	# -------------------------------------------------------------
 	_simulate_mouse_button(p, MOUSE_BUTTON_RIGHT, true)
+	await physics_frame
 	await process_frame
 	
 	var rmb_down_pass: bool = (p.combat_state == PlayerController.CombatState.BLOCK)
@@ -73,6 +75,7 @@ func _run_test_suite() -> void:
 	# -------------------------------------------------------------
 	# block_start length is ~0.208s, wait until it transitions to block_hold
 	for i in range(35):
+		await physics_frame
 		await process_frame
 		if p._block_transition == "holding":
 			break
@@ -92,6 +95,7 @@ func _run_test_suite() -> void:
 	Input.action_press("move_forward")
 	
 	for f in range(60):
+		await physics_frame
 		await process_frame
 		
 		if p.combat_state != PlayerController.CombatState.BLOCK:
@@ -108,6 +112,7 @@ func _run_test_suite() -> void:
 	# Release move_forward
 	Input.action_release("move_forward")
 	for f in range(20):
+		await physics_frame
 		await process_frame
 
 
@@ -119,6 +124,7 @@ func _run_test_suite() -> void:
 	# STEP 5: RELEASE RMB -> block_release
 	# -------------------------------------------------------------
 	_simulate_mouse_button(p, MOUSE_BUTTON_RIGHT, false)
+	await physics_frame
 	await process_frame
 	
 	var rmb_release_pass: bool = (p.combat_state == PlayerController.CombatState.IDLE or p.combat_state == PlayerController.CombatState.RUN)
@@ -131,6 +137,7 @@ func _run_test_suite() -> void:
 	# STEP 6: WAIT FOR block_release TO FINISH -> IDLE / locomotion resumes
 	# -------------------------------------------------------------
 	for i in range(20):
+		await physics_frame
 		await process_frame
 		
 	var release_done_pass: bool = (p.combat_state == PlayerController.CombatState.IDLE)
@@ -144,6 +151,7 @@ func _run_test_suite() -> void:
 	# Simulate moving forward with W key (100% speed)
 	Input.action_press("move_forward")
 	for f in range(45):
+		await physics_frame
 		await process_frame
 	
 	var full_speed: float = Vector2(p.velocity.x, p.velocity.z).length()
@@ -155,6 +163,7 @@ func _run_test_suite() -> void:
 	# Stop movement and verify return to IDLE
 	Input.action_release("move_forward")
 	for f in range(35):
+		await physics_frame
 		await process_frame
 	move_pass = move_pass and (p.combat_state == PlayerController.CombatState.IDLE)
 	move_pass = move_pass and (p.anim_player.current_animation == "idle")
@@ -164,6 +173,7 @@ func _run_test_suite() -> void:
 	# STEP 8: PRESS RMB AGAIN -> BLOCK WORKS AGAIN
 	# -------------------------------------------------------------
 	_simulate_mouse_button(p, MOUSE_BUTTON_RIGHT, true)
+	await physics_frame
 	await process_frame
 	
 	var rmb_again_pass: bool = (p.combat_state == PlayerController.CombatState.BLOCK)
@@ -172,6 +182,7 @@ func _run_test_suite() -> void:
 	
 	# Wait for block_hold
 	for i in range(35):
+		await physics_frame
 		await process_frame
 		if p._block_transition == "holding":
 			break
@@ -183,9 +194,11 @@ func _run_test_suite() -> void:
 	# STEP 9: RELEASE AGAIN -> EXITS BLOCK AGAIN
 	# -------------------------------------------------------------
 	_simulate_mouse_button(p, MOUSE_BUTTON_RIGHT, false)
+	await physics_frame
 	await process_frame
 	
 	for i in range(35):
+		await physics_frame
 		await process_frame
 		if p._block_transition == "":
 			break
@@ -200,11 +213,14 @@ func _run_test_suite() -> void:
 	# STEP 10: BLOCK + LMB -> ATTACK
 	# -------------------------------------------------------------
 	_simulate_mouse_button(p, MOUSE_BUTTON_RIGHT, true)
+	await physics_frame
 	await process_frame
 	for i in range(12):
+		await physics_frame
 		await process_frame
 	# Now while blocking, click LMB to attack
 	_simulate_mouse_button(p, MOUSE_BUTTON_LEFT, true)
+	await physics_frame
 	await process_frame
 	
 	var block_lmb_pass: bool = (p.combat_state == PlayerController.CombatState.ATTACK)
@@ -215,6 +231,7 @@ func _run_test_suite() -> void:
 
 	# Wait for attack swing to complete
 	for i in range(50):
+		await physics_frame
 		await process_frame
 		if not p.is_attacking:
 			break
@@ -224,10 +241,12 @@ func _run_test_suite() -> void:
 	# -------------------------------------------------------------
 	# Start fresh attack
 	p.transition_to(PlayerController.CombatState.ATTACK)
+	await physics_frame
 	await process_frame
 	
 	# While attacking, try to press RMB
 	_simulate_mouse_button(p, MOUSE_BUTTON_RIGHT, true)
+	await physics_frame
 	await process_frame
 	
 	var attack_rmb_rejected: bool = (p.combat_state == PlayerController.CombatState.ATTACK)
@@ -237,14 +256,26 @@ func _run_test_suite() -> void:
 	# -------------------------------------------------------------
 	# STEP 12: SEQUENCE D (RMB held -> LMB -> Attack finishes while RMB held -> IDLE/RUN, no freeze)
 	# -------------------------------------------------------------
+	# Finish STEP 11 before beginning a fresh block -> attack sequence.
+	for i in range(180):
+		await physics_frame
+		await process_frame
+		if not p.is_attacking and p.combo_finisher_recovery_remaining <= 0.0 and p.combat.can_attack():
+			break
+	_simulate_mouse_button(p, MOUSE_BUTTON_RIGHT, false)
 	_simulate_mouse_button(p, MOUSE_BUTTON_RIGHT, true)
+	await physics_frame
 	await process_frame
-	for i in range(12): await process_frame
+	for i in range(12):
+		await physics_frame
+		await process_frame
 	_simulate_mouse_button(p, MOUSE_BUTTON_LEFT, true)
+	await physics_frame
 	await process_frame
 	_simulate_mouse_button(p, MOUSE_BUTTON_LEFT, false)
 	# Wait for attack to finish while RMB is still held
 	for i in range(50):
+		await physics_frame
 		await process_frame
 		if not p.is_attacking:
 			break
@@ -253,6 +284,7 @@ func _run_test_suite() -> void:
 	seq_d_pass = seq_d_pass and (p._block_transition == "")
 	seq_d_pass = seq_d_pass and (p.anim_player.current_animation == "idle" or p.anim_player.current_animation == "run")
 	_simulate_mouse_button(p, MOUSE_BUTTON_RIGHT, false)
+	await physics_frame
 	await process_frame
 	_record_result("STEP 12: Sequence D (Block -> Attack finishes with RMB held)", seq_d_pass, "Attack cleanly returns to locomotion without freeze or invalid block lockup")
 
@@ -260,10 +292,13 @@ func _run_test_suite() -> void:
 	# STEP 13: SEQUENCE E (Release during block_start -> snappy recovery)
 	# -------------------------------------------------------------
 	_simulate_mouse_button(p, MOUSE_BUTTON_RIGHT, true)
+	await physics_frame
 	await process_frame
 	await process_frame # ~30ms in, block_start is playing
 	_simulate_mouse_button(p, MOUSE_BUTTON_RIGHT, false)
-	for i in range(25): await process_frame
+	for i in range(25):
+		await physics_frame
+		await process_frame
 	var seq_e_pass: bool = (p.combat_state == PlayerController.CombatState.IDLE)
 	seq_e_pass = seq_e_pass and (p._block_transition == "")
 	seq_e_pass = seq_e_pass and (p.anim_player.current_animation == "idle")
@@ -274,6 +309,7 @@ func _run_test_suite() -> void:
 	# -------------------------------------------------------------
 	_simulate_mouse_button(p, MOUSE_BUTTON_RIGHT, true)
 	for i in range(35):
+		await physics_frame
 		await process_frame
 		if p._block_transition == "holding":
 			break
@@ -282,7 +318,9 @@ func _run_test_suite() -> void:
 	var seq_g_pass: bool = (p.combat_state != PlayerController.CombatState.BLOCK) # Block released on focus loss
 	# Recapture
 	p._set_mouse_captured(true)
-	for i in range(25): await process_frame
+	for i in range(25):
+		await physics_frame
+		await process_frame
 	seq_g_pass = seq_g_pass and (p.combat_state == PlayerController.CombatState.IDLE)
 	seq_g_pass = seq_g_pass and (p._block_transition == "")
 	_record_result("STEP 14: Sequence G (Mouse uncapture/recapture)", seq_g_pass, "Block safely released on focus loss, no stuck stance upon recapture")
@@ -295,6 +333,7 @@ func _run_test_suite() -> void:
 		# 1. Hold RMB
 		_simulate_mouse_button(p, MOUSE_BUTTON_RIGHT, true)
 		for f in range(35):
+			await physics_frame
 			await process_frame
 			if p._block_transition == "holding":
 				break
@@ -306,6 +345,7 @@ func _run_test_suite() -> void:
 		# 2. Release RMB
 		_simulate_mouse_button(p, MOUSE_BUTTON_RIGHT, false)
 		for f in range(35):
+			await physics_frame
 			await process_frame
 			if p.combat_state != PlayerController.CombatState.BLOCK and p._block_transition == "":
 				break
@@ -317,6 +357,7 @@ func _run_test_suite() -> void:
 		# 3. Move with WASD
 		Input.action_press("move_forward")
 		for f in range(30):
+			await physics_frame
 			await process_frame
 			if p.combat_state == PlayerController.CombatState.RUN and p.anim_player.current_animation == "run":
 				break
@@ -326,6 +367,7 @@ func _run_test_suite() -> void:
 			break
 		Input.action_release("move_forward")
 		for f in range(40):
+			await physics_frame
 			await process_frame
 			if p.combat_state == PlayerController.CombatState.IDLE and p.anim_player.current_animation == "idle":
 				break

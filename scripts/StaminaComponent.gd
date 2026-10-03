@@ -15,6 +15,7 @@ signal stamina_filled()
 
 ## State
 var current_stamina: float = 0.0
+var training_infinite: bool = false
 
 
 func _ready() -> void:
@@ -31,7 +32,7 @@ func is_full() -> bool:
 
 
 func consume_stamina(amount: float) -> bool:
-	if amount <= 0.0:
+	if training_infinite or amount <= 0.0:
 		return true
 	if not has_enough_stamina(amount):
 		return false

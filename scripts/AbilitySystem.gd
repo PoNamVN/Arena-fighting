@@ -179,3 +179,13 @@ func cast_ability(slot_name: String) -> bool:
 func reset_cooldowns() -> void:
 	_cooldowns.clear()
 	_max_cooldowns.clear()
+
+
+func clear_loadout() -> void:
+	_slots.clear()
+	_cooldowns.clear()
+	_max_cooldowns.clear()
+	slot_skill_1 = null
+	slot_skill_2 = null
+	slot_skill_3 = null
+	slot_ultimate = null

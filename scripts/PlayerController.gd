@@ -1,6 +1,10 @@
 class_name PlayerController
 extends CharacterBody3D
 
+@export var external_controlled: bool = false
+var controls_enabled: bool = true
+var external_move_direction: Vector3 = Vector3.ZERO
+
 # Store previous global position for shield charge impact correction
 var _last_global_position: Vector3 = Vector3.ZERO
 
@@ -16,6 +20,9 @@ enum CombatState {
 }
 
 signal state_changed(old_state: CombatState, new_state: CombatState)
+# Reserved visual-only hooks. Emissions are deliberately not wired in task 0.2.
+signal presentation_cast_started(skill_id: StringName)
+signal presentation_skill_finished(skill_id: StringName, cancelled: bool)
 
 ## Configuration Parameters
 @export_group("Movement")
@@ -131,11 +138,29 @@ signal ability_action_started(slot_name: String, ability: AbilityData)
 signal ability_action_finished(slot_name: String)
 
 @export var hero_profile: String = "knight"
+var archer_combat: ArcherCombat = null
+var spectacle: Node
+var wizard_combat: WizardCombat = null
+var frost: FreezeEffect
+var polymorph: PolymorphEffect
 var is_shield_enlarged: bool = false
 var _giant_shield_visual: Node3D = null
 var _shield_visual_tween: Tween = null
 var _shield_bone_idx: int = -1
 @export var steering_turn_rate: float = 7.0 # rad/s (~400 deg/s)
+
+## Sky Dive (X) State
+var _sky_dive_sub_phase: int = 0  # 0=none, 1=takeoff, 2=aim, 3=dive, 4=landing
+var _sky_dive_direction: Vector3 = Vector3.FORWARD
+var _sky_dive_start_y: float = 0.0
+var _sky_dive_aim_entry_frame: int = -1
+var _sky_dive_attack_armed: bool = false
+const SKY_DIVE_LAUNCH_VELOCITY: float = 12.0  # Upward launch speed
+const SKY_DIVE_JUMP_HEIGHT: float = 3.5  # Target height
+const SKY_DIVE_DIVE_SPEED: float = 20.0  # Dive movement speed
+const SKY_DIVE_HOVER_GRAVITY: float = 4.0  # Reduced gravity during aim
+
+@onready var giant_sword_ultimate: GiantSwordUltimate = get_node_or_null("GiantSwordUltimate") as GiantSwordUltimate
 
 var anim_player: AnimationPlayer = null
 var _skeleton: Skeleton3D = null
@@ -211,12 +236,23 @@ var is_dead: bool:
 
 func _ready() -> void:
 	_setup_fallback_input_actions()
-	_set_mouse_captured(true)
+	if not external_controlled:
+		_set_mouse_captured(true)
+	else:
+		camera.current = false
 	if camera_pivot:
 		_camera_yaw = camera_pivot.rotation.y
 		_camera_pitch = camera_pivot.rotation.x
 	if spring_arm:
 		spring_arm.add_excluded_object(get_rid())
+	if hero_profile in ["archer", "wizard"]:
+		var old_model: Node = visuals.get_node("CharacterModel")
+		visuals.remove_child(old_model)
+		old_model.queue_free()
+		var model_scene: PackedScene = preload("res://assets/models/elemental_wizard.glb") if hero_profile == "wizard" else preload("res://assets/models/forest_archer.glb")
+		var hunter: Node3D = model_scene.instantiate() as Node3D
+		hunter.name = "CharacterModel"
+		visuals.add_child(hunter)
 	_setup_animation_player()
 	set_third_person(is_third_person)
 
@@ -247,10 +283,30 @@ func _ready() -> void:
 		ability_system = AbilitySystem.new()
 		ability_system.name = "AbilitySystem"
 		add_child(ability_system)
+	polymorph = PolymorphEffect.new()
+	polymorph.actor = self
+	add_child(polymorph)
+	frost = FreezeEffect.new()
+	frost.actor = self
+	add_child(frost)
 	ability_system.stamina_component = stamina_component
 	if hero_profile == "knight":
 		equip_knight_loadout()
+	elif hero_profile == "archer":
+		ability_system.clear_loadout()
+		archer_combat = ArcherCombat.new()
+		archer_combat.name = "ArcherCombat"
+		archer_combat.actor = self
+		add_child(archer_combat)
+	elif hero_profile == "wizard":
+		ability_system.clear_loadout()
+		wizard_combat = WizardCombat.new()
+		wizard_combat.actor = self
+		add_child(wizard_combat)
 
+	spectacle = preload("res://scripts/CombatSpectacle.gd").new()
+	spectacle.name = "CombatSpectacle"
+	add_child(spectacle)
 
 func equip_knight_loadout() -> void:
 	if ability_system:
@@ -259,6 +315,8 @@ func equip_knight_loadout() -> void:
 
 
 func _unhandled_input(event: InputEvent) -> void:
+	if external_controlled or not controls_enabled:
+		return
 	# Once DEAD: lock all movement, attack, and block input
 	if combat_state == CombatState.DEAD:
 		# Still allow camera look and perspective toggle for viewing death
@@ -272,6 +330,19 @@ func _unhandled_input(event: InputEvent) -> void:
 				camera_pivot.rotation.x = _camera_pitch + _cam_recoil_pitch
 		elif event.is_action_pressed("toggle_perspective") and not event.is_echo():
 			toggle_camera_perspective()
+		return
+
+	if wizard_combat and wizard_combat.storm.active():
+		wizard_combat.storm.handle_input(event)
+		get_viewport().set_input_as_handled()
+		return
+	if archer_combat and archer_combat.bait_ultimate.phase == ArcherBaitUltimate.Phase.AIM:
+		archer_combat.bait_ultimate.handle_input(event)
+		get_viewport().set_input_as_handled()
+		return
+
+	if active_ability_action and active_ability_action.is_active() and active_ability_action.data.id == "giant_sword_ultimate":
+		giant_sword_ultimate.handle_input(event)
 		return
 
 	# Toggle third-person / first-person perspective
@@ -302,8 +373,22 @@ func _unhandled_input(event: InputEvent) -> void:
 			_set_mouse_captured(true)
 		return
 
+	if is_control_impaired():
+		return
+	if wizard_combat:
+		wizard_combat.handle_input(event)
+		return
+	if archer_combat:
+		archer_combat.handle_input(event)
+		return
+
 	# Combat Input Actions (Single source of truth via InputMap)
 	if event.is_action_pressed("attack") and not event.is_echo():
+		# X owns LMB throughout its lifecycle; physics validates the fresh AIM edge.
+		if active_ability_action and active_ability_action.is_active() and active_ability_action.data and active_ability_action.data.id == "sky_dive":
+			if _sky_dive_sub_phase == 2 and Engine.get_physics_frames() <= _sky_dive_aim_entry_frame:
+				_sky_dive_attack_armed = false
+			return
 		if is_counter_window_active():
 			if try_counter_attack(true):
 				return
@@ -329,6 +414,14 @@ func _unhandled_input(event: InputEvent) -> void:
 
 
 func _physics_process(delta: float) -> void:
+	if spectacle and hero_profile == "knight" and active_ability_action and active_ability_action.is_active():
+		spectacle.wake()
+	if not controls_enabled and not is_dead:
+		velocity = Vector3.ZERO
+		if not is_on_floor():
+			velocity.y = -gravity * delta
+		move_and_slide()
+		return
 	# DEAD state locks character in place
 	if combat_state == CombatState.DEAD:
 		_knockback_timer = 0.0
@@ -340,6 +433,23 @@ func _physics_process(delta: float) -> void:
 			move_and_slide()
 		else:
 			velocity.y = 0.0
+		return
+
+	if wizard_combat and wizard_combat.storm.active():
+		velocity.x = 0
+		velocity.z = 0
+		velocity.y = -0.1 if is_on_floor() else velocity.y - gravity * delta
+		move_and_slide()
+		return
+	if wizard_combat and wizard_combat.ice.active:
+		wizard_combat.ice.process_movement(delta)
+		return
+	if frost and frost.active():
+		_knockback_timer = maxf(0, _knockback_timer - delta)
+		velocity.x = 0
+		velocity.z = 0
+		velocity.y = -0.1 if is_on_floor() else velocity.y - gravity * delta
+		move_and_slide()
 		return
 
 	# DODGE state: moves character with dodge velocity
@@ -354,6 +464,24 @@ func _physics_process(delta: float) -> void:
 		move_and_slide()
 		if visuals and dodge_controller and dodge_controller.world_direction.length_squared() > 0.01:
 			visuals.rotation.y = atan2(-dodge_controller.world_direction.x, -dodge_controller.world_direction.z)
+		return
+
+	if archer_combat and archer_combat.bait_ultimate.input_busy() and _knockback_timer <= 0.0:
+		velocity.x = 0.0
+		velocity.z = 0.0
+		velocity.y = -0.1 if is_on_floor() else velocity.y - gravity * delta
+		move_and_slide()
+		return
+
+	if archer_combat and archer_combat.dash_active:
+		archer_combat.process_escape_movement(delta)
+		return
+
+	if wizard_combat and wizard_combat.counter_active:
+		wizard_combat.process_counter_movement(delta)
+		return
+	if archer_combat and archer_combat.counter_active:
+		archer_combat.process_counter_movement(delta)
 		return
 
 	# COUNTER state: fast lunge towards target using move_and_slide(), then strike on arrival
@@ -422,6 +550,10 @@ func _physics_process(delta: float) -> void:
 		_process_sky_dive(delta)
 		return
 
+	if active_ability_action and active_ability_action.is_active() and active_ability_action.data and active_ability_action.data.id in ["whirling_blade", "giant_sword_ultimate"]:
+		_process_stationary_ability(delta)
+		return
+
 	# Shield break timers
 	if shield_state == ShieldState.BROKEN:
 		if _shield_stun_timer > 0.0:
@@ -437,7 +569,7 @@ func _physics_process(delta: float) -> void:
 		velocity.y -= gravity * delta
 	else:
 		# Jump (disabled while blocking, attacking, or stunned)
-		if Input.is_action_just_pressed("jump") and combat_state != CombatState.BLOCK and combat_state != CombatState.ATTACK and _shield_stun_timer <= 0.0:
+		if not external_controlled and Input.is_action_just_pressed("jump") and combat_state != CombatState.BLOCK and combat_state != CombatState.ATTACK and _shield_stun_timer <= 0.0 and not (is_control_impaired()):
 			velocity.y = jump_velocity
 		elif velocity.y < 0.0:
 			velocity.y = -0.1
@@ -454,13 +586,20 @@ func _physics_process(delta: float) -> void:
 		if move_dir.length_squared() > 1.0:
 			move_dir = move_dir.normalized()
 
+	if external_controlled:
+		move_dir = external_move_direction.limit_length(1.0)
+
 	# Determine Target Speed
-	var is_sprinting: bool = Input.is_action_pressed("sprint")
+	var is_sprinting: bool = not external_controlled and Input.is_action_pressed("sprint")
 	var target_speed: float = sprint_speed if is_sprinting else walk_speed
 	if combat_state == CombatState.ATTACK or _combo_finisher_recovery_timer > 0.0:
 		target_speed *= 0.5 # Phase 2: 50% attack movement speed
 	elif combat_state == CombatState.BLOCK:
 		target_speed *= 0.45 # Phase 3: 45% block movement speed
+	if wizard_combat and (wizard_combat.charging or wizard_combat.spell != "" or wizard_combat.staff_strike.active):
+		target_speed *= 0.55
+	if archer_combat and (archer_combat.charging or archer_combat.volley_active or archer_combat.seeking_active):
+		target_speed *= 0.35 if archer_combat.volley_active else 0.55
 	var target_horizontal: Vector3 = move_dir * target_speed
 	if _shield_stun_timer > 0.0:
 		target_horizontal = Vector3.ZERO # Stop movement during shield break stun
@@ -531,6 +670,8 @@ func _physics_process(delta: float) -> void:
 
 ## FSM Transition Logic
 func transition_to(new_state: CombatState) -> bool:
+	if is_control_impaired() and new_state in [CombatState.ATTACK, CombatState.BLOCK, CombatState.COUNTER, CombatState.DODGE]:
+		return false
 	if combat_state == CombatState.DEAD:
 		# DEAD is terminal: ignore any transition attempt
 		return false
@@ -546,7 +687,7 @@ func transition_to(new_state: CombatState) -> bool:
 
 	match new_state:
 		CombatState.IDLE:
-			if combat_state == CombatState.ATTACK or (combat_state == CombatState.COUNTER and not _counter_strike_executed):
+			if combat_state == CombatState.ATTACK or (combat_state == CombatState.COUNTER and not _counter_strike_executed and not archer_combat and not wizard_combat):
 				# Cannot exit attack or active counter prematurely
 				return false
 			combat_state = CombatState.IDLE
@@ -674,6 +815,7 @@ func _enter_dead_state() -> void:
 	if active_ability_action:
 		active_ability_action.cancel()
 		active_ability_action = null
+	_clear_sky_dive_state()
 	if stamina_component:
 		stamina_component.reset_stamina()
 	CombatTimeManager.reset_time()
@@ -798,6 +940,12 @@ func find_counter_target(range_limit: float = 8.0) -> Node3D:
 
 
 func try_counter_attack(is_new_press: bool = true) -> bool:
+	if is_control_impaired():
+		return false
+	if wizard_combat:
+		return is_new_press and wizard_combat.start_counter()
+	if archer_combat:
+		return is_new_press and archer_combat.start_counter()
 	if not is_new_press:
 		return false
 	if not is_counter_window_active():
@@ -889,6 +1037,10 @@ func _can_cancel_attack_into_dodge() -> bool:
 
 
 func _try_dodge() -> bool:
+	if is_control_impaired():
+		return false
+	if not controls_enabled:
+		return false
 	if combat_state == CombatState.DEAD:
 		return false
 	if _combo_finisher_recovery_timer > 0.0:
@@ -909,6 +1061,10 @@ func _try_dodge() -> bool:
 
 	var input_x: float = Input.get_axis("move_left", "move_right")
 	var input_z: float = Input.get_axis("move_forward", "move_backward")
+	if external_controlled:
+		var local_direction: Vector3 = Basis(Vector3.UP, _camera_yaw).inverse() * external_move_direction
+		input_x = local_direction.x
+		input_z = local_direction.z
 	var input_vec: Vector2 = Vector2(input_x, -input_z)
 	var resolved_dir: DodgeController.Direction = dodge_controller.determine_dodge_direction(input_vec)
 
@@ -921,6 +1077,10 @@ func _try_dodge() -> bool:
 	world_dir.y = 0.0
 	world_dir = world_dir.normalized()
 
+	if wizard_combat:
+		wizard_combat.interrupt()
+	if archer_combat:
+		archer_combat.interrupt()
 	if transition_to(CombatState.DODGE):
 		var started: bool = dodge_controller.start_dodge(resolved_dir, world_dir)
 		if started and combat_feedback and combat_feedback.has_method("trigger_dodge_feedback"):
@@ -932,8 +1092,8 @@ func _try_dodge() -> bool:
 
 func _on_dodge_completed() -> void:
 	if combat_state == CombatState.DODGE:
-		var input_x: float = Input.get_axis("move_left", "move_right")
-		var input_z: float = Input.get_axis("move_forward", "move_backward")
+		var input_x: float = external_move_direction.x if external_controlled else Input.get_axis("move_left", "move_right")
+		var input_z: float = external_move_direction.z if external_controlled else Input.get_axis("move_forward", "move_backward")
 		var has_input: bool = (abs(input_x) > 0.1 or abs(input_z) > 0.1)
 		if not has_input:
 			velocity.x = 0.0
@@ -944,6 +1104,10 @@ func _on_dodge_completed() -> void:
 		_update_locomotion_animations()
 
 
+func is_targetable() -> bool:
+	return not is_dead and not (archer_combat and archer_combat.is_hidden())
+
+
 func get_facing_direction() -> Vector3:
 	var fwd: Vector3 = (-visuals.global_basis.z) if (visuals and is_third_person) else (-camera.global_basis.z if camera else -global_basis.z)
 	fwd.y = 0.0
@@ -951,6 +1115,24 @@ func get_facing_direction() -> Vector3:
 
 
 func _try_cast_ability(slot_name: String) -> bool:
+	if is_control_impaired():
+		return false
+	if wizard_combat:
+		match slot_name:
+			"skill_1": return wizard_combat.start_staff()
+			"skill_2": return wizard_combat.start_polymorph()
+			"skill_3": return wizard_combat.ice.begin()
+			"ultimate": return wizard_combat.storm.begin()
+		return false
+	if archer_combat:
+		match slot_name:
+			"skill_1": return archer_combat.start_volley()
+			"skill_2": return archer_combat.start_seeking()
+			"skill_3": return archer_combat.start_escape()
+			"ultimate": return archer_combat.bait_ultimate.begin()
+		return false
+	if not controls_enabled:
+		return false
 	if combat_state == CombatState.DEAD:
 		return false
 	if _combo_finisher_recovery_timer > 0.0:
@@ -994,12 +1176,20 @@ func _try_cast_ability(slot_name: String) -> bool:
 		_start_shield_charge(ability)
 	elif ability.id == "sky_dive":
 		_start_sky_dive(ability)
+	elif ability.id == "whirling_blade":
+		_start_whirling_blade()
+	elif ability.id == "giant_sword_ultimate":
+		_start_giant_sword()
 	else:
 		_execute_ability_effect(slot_name, ability)
 	return true
 
 
 func _on_ability_action_finished(slot_name: String) -> void:
+	_clear_whirling_blade()
+	_clear_giant_sword()
+	if active_ability_action and active_ability_action.data and active_ability_action.data.id == "sky_dive":
+		_clear_sky_dive_state()
 	_retract_giant_shield()
 	_combo_step = 0
 	_combo_recovery_timer = 0.0
@@ -1009,12 +1199,104 @@ func _on_ability_action_finished(slot_name: String) -> void:
 
 
 func _on_ability_action_cancelled(slot_name: String) -> void:
+	_clear_whirling_blade()
+	_clear_giant_sword()
+	if active_ability_action and active_ability_action.data and active_ability_action.data.id == "sky_dive":
+		_clear_sky_dive_state()
 	_retract_giant_shield()
 	_combo_step = 0
 	_combo_recovery_timer = 0.0
 	_update_locomotion_animations()
 	ability_action_finished.emit(slot_name)
 	active_ability_action = null
+
+
+func _start_whirling_blade() -> void:
+	_orient_attack_direction()
+	if combat_state == CombatState.ATTACK or combat_state == CombatState.BLOCK:
+		var old_state: CombatState = combat_state
+		combat_state = CombatState.IDLE
+		state_changed.emit(old_state, combat_state)
+	reset_combo()
+	_block_transition = ""
+	_attack_impact_applied = true
+	velocity.x = 0.0
+	velocity.z = 0.0
+	active_ability_action.phase_changed.connect(_on_whirling_blade_phase_changed)
+	if anim_player:
+		anim_player.speed_scale = 1.0
+		anim_player.play("Knight_C_WhirlingBlade", 0.05)
+
+
+func _on_whirling_blade_phase_changed(_old_phase: int, new_phase: int) -> void:
+	if new_phase == AbilityAction.Phase.ACTIVE and combat:
+		var action: AbilityAction = active_ability_action
+		combat.execute_radial_ability_impact(action.data, action)
+
+
+func _process_stationary_ability(delta: float) -> void:
+	var action: AbilityAction = active_ability_action
+	var is_ultimate: bool = action.data.id == "giant_sword_ultimate"
+	if not is_ultimate or not giant_sword_ultimate.aiming:
+		action.update(delta)
+	if active_ability_action != action or not action.is_active():
+		return
+	if is_ultimate:
+		giant_sword_ultimate.tick(delta, action)
+	# WASD is locked; receiving a hit still applies the existing recoil impulse.
+	velocity.x = 0.0
+	velocity.z = 0.0
+	if _knockback_timer > 0.0:
+		_knockback_timer = maxf(0.0, _knockback_timer - delta)
+		if _knockback_timer > 0.0:
+			velocity.x = _knockback_vel.x
+			velocity.z = _knockback_vel.z
+	velocity.y = velocity.y - gravity * delta if not is_on_floor() else -0.1
+	if visuals:
+		visuals.rotation.y = _camera_yaw
+	move_and_slide()
+
+
+func _clear_whirling_blade() -> void:
+	if not active_ability_action or not active_ability_action.data or active_ability_action.data.id != "whirling_blade":
+		return
+	if combat and combat.whirling_blade_vfx:
+		combat.whirling_blade_vfx.stop()
+	if anim_player and anim_player.current_animation == "Knight_C_WhirlingBlade":
+		anim_player.stop()
+		anim_player.speed_scale = 1.0
+
+
+func _start_giant_sword() -> void:
+	_orient_attack_direction()
+	if combat_state == CombatState.ATTACK or combat_state == CombatState.BLOCK:
+		var old_state: CombatState = combat_state
+		combat_state = CombatState.IDLE
+		state_changed.emit(old_state, combat_state)
+	reset_combo()
+	_block_transition = ""
+	_attack_impact_applied = true
+	velocity.x = 0.0
+	velocity.z = 0.0
+	active_ability_action.phase_changed.connect(_on_giant_sword_phase_changed)
+	giant_sword_ultimate.begin()
+
+
+func _on_giant_sword_phase_changed(_old_phase: int, new_phase: int) -> void:
+	if new_phase == AbilityAction.Phase.ACTIVE and combat:
+		giant_sword_ultimate.impact()
+		var action: AbilityAction = active_ability_action
+		combat.execute_radial_ability_impact(action.data, action)
+
+
+func _clear_giant_sword() -> void:
+	if not active_ability_action or not active_ability_action.data or active_ability_action.data.id != "giant_sword_ultimate":
+		return
+	if giant_sword_ultimate:
+		giant_sword_ultimate.stop()
+	if anim_player and anim_player.current_animation == "Knight_V_GiantSword":
+		anim_player.stop()
+		anim_player.speed_scale = 1.0
 
 
 func _setup_giant_shield_visual() -> void:
@@ -1131,17 +1413,53 @@ func _on_shield_charge_phase_changed(old_phase: int, new_phase: int) -> void:
 
 func _start_sky_dive(ability: AbilityData) -> void:
 	_orient_attack_direction()
+	# X may replace an allowed attack follow-through or block release.
+	if combat_state == CombatState.ATTACK or combat_state == CombatState.BLOCK:
+		var old_state: CombatState = combat_state
+		combat_state = CombatState.IDLE
+		state_changed.emit(old_state, combat_state)
+	reset_combo()
+	_block_transition = ""
+	_attack_impact_applied = true
+	_sky_dive_sub_phase = 0
+	_sky_dive_direction = Vector3.FORWARD
+	_sky_dive_start_y = global_position.y
+	_sky_dive_aim_entry_frame = -1
+	_sky_dive_attack_armed = false
 	if active_ability_action:
 		active_ability_action.phase_changed.connect(_on_sky_dive_phase_changed)
+	# Play sky dive animation if available
+	if anim_player and anim_player.has_animation("Knight_X_SkyDive"):
+		anim_player.speed_scale = 1.0
+		anim_player.play("Knight_X_SkyDive", 0.1)
 
 
 func _on_sky_dive_phase_changed(old_phase: int, new_phase: int) -> void:
 	if new_phase == AbilityAction.Phase.ACTIVE:
-		print("[SkyDive] Phase: AIM/PENDING (ACTIVE)")
+		# ACTIVE = begin TAKEOFF sub-phase (launch upward)
+		_sky_dive_sub_phase = 1  # TAKEOFF
+		velocity.y = SKY_DIVE_LAUNCH_VELOCITY
 	elif new_phase == AbilityAction.Phase.RECOVERY:
-		print("[SkyDive] Phase: RECOVERY")
-	elif new_phase == AbilityAction.Phase.FINISHED:
-		print("[SkyDive] Phase: FINISHED")
+		_sky_dive_sub_phase = 4  # LANDING/RECOVERY
+		if anim_player and anim_player.has_animation("Knight_X_SkyDive"):
+			var animation: Animation = anim_player.get_animation("Knight_X_SkyDive")
+			anim_player.play("Knight_X_SkyDive")
+			anim_player.seek(animation.length * 0.8, true)
+			if active_ability_action and active_ability_action.data.recovery_duration > 0.0:
+				anim_player.speed_scale = animation.length * 0.2 / active_ability_action.data.recovery_duration
+
+
+func _clear_sky_dive_state() -> void:
+	if _sky_dive_sub_phase != 0:
+		velocity = Vector3.ZERO
+	_sky_dive_sub_phase = 0
+	_sky_dive_direction = Vector3.FORWARD
+	_sky_dive_start_y = 0.0
+	_sky_dive_aim_entry_frame = -1
+	_sky_dive_attack_armed = false
+	if anim_player and anim_player.current_animation == "Knight_X_SkyDive":
+		anim_player.stop()
+		anim_player.speed_scale = 1.0
 
 
 func _process_shield_charge(delta: float) -> void:
@@ -1209,29 +1527,94 @@ func _process_shield_charge(delta: float) -> void:
 
 
 func _process_sky_dive(delta: float) -> void:
-	var action = active_ability_action
+	var action: AbilityAction = active_ability_action
 	if not action or not action.is_active():
 		return
 
-	# Update the ability first
-	action.update(delta)
-
-	if not is_instance_valid(action):
-		return
-	if active_ability_action != action:
-		return
-	if not action.is_active():
-		return
-
-	match action.current_phase:
-		AbilityAction.Phase.STARTUP, AbilityAction.Phase.ACTIVE, AbilityAction.Phase.RECOVERY:
+	if action.current_phase == AbilityAction.Phase.STARTUP:
+		action.update(delta)
+		if active_ability_action != action or not action.is_active():
+			return
+		# On the transition frame, immediately use TAKEOFF physics. Never
+		# overwrite the launch with the grounded startup velocity.
+		if action.current_phase == AbilityAction.Phase.STARTUP:
 			velocity.x = move_toward(velocity.x, 0.0, friction * delta)
 			velocity.z = move_toward(velocity.z, 0.0, friction * delta)
-			if not is_on_floor():
-				velocity.y -= gravity * delta
-			else:
-				velocity.y = -0.1
+			velocity.y = velocity.y - gravity * delta if not is_on_floor() else -0.1
 			move_and_slide()
+			return
+
+	if action.current_phase == AbilityAction.Phase.ACTIVE:
+		# ACTIVE is manually owned by X; no timer can confirm or land it.
+		match _sky_dive_sub_phase:
+			1: # TAKEOFF
+				velocity.y -= SKY_DIVE_HOVER_GRAVITY * delta
+				velocity.x = move_toward(velocity.x, 0.0, friction * delta)
+				velocity.z = move_toward(velocity.z, 0.0, friction * delta)
+				move_and_slide()
+				var height_gained: float = global_position.y - _sky_dive_start_y
+				if not is_on_floor() and (height_gained >= SKY_DIVE_JUMP_HEIGHT or velocity.y <= 0.5):
+					_sky_dive_sub_phase = 2
+					velocity = Vector3.ZERO
+					_sky_dive_aim_entry_frame = Engine.get_physics_frames()
+					_sky_dive_attack_armed = not Input.is_action_pressed("attack")
+					if anim_player and anim_player.has_animation("Knight_X_SkyDive"):
+						anim_player.seek(anim_player.get_animation("Knight_X_SkyDive").length * 0.3, true)
+						anim_player.pause()
+			2: # AERIAL AIM: hover until a new, post-entry LMB edge
+				velocity = Vector3.ZERO
+				move_and_slide()
+				if visuals:
+					visuals.rotation.y = _camera_yaw
+				if not Input.is_action_pressed("attack"):
+					_sky_dive_attack_armed = true
+				if Engine.get_physics_frames() > _sky_dive_aim_entry_frame and _sky_dive_attack_armed and Input.is_action_just_pressed("attack"):
+					_sky_dive_begin_dive()
+			3: # DIVE: collision movement, never a position assignment
+				var dive_speed: float = action.data.movement_speed if action.data else SKY_DIVE_DIVE_SPEED
+				velocity = _sky_dive_direction * dive_speed
+				move_and_slide()
+				if is_on_floor():
+					_sky_dive_end_dive(action)
+		return
+
+	if action.current_phase == AbilityAction.Phase.RECOVERY:
+		velocity.x = move_toward(velocity.x, 0.0, friction * 2.0 * delta)
+		velocity.z = move_toward(velocity.z, 0.0, friction * 2.0 * delta)
+		velocity.y = velocity.y - gravity * delta if not is_on_floor() else -0.1
+		move_and_slide()
+		# Recovery is measured on the floor, not while falling off an edge.
+		if is_on_floor():
+			action.update(delta)
+
+
+func _sky_dive_begin_dive() -> void:
+	var aim_basis: Basis = Basis.from_euler(Vector3(_camera_pitch, _camera_yaw, 0.0))
+	_sky_dive_direction = -aim_basis.z
+	# Preserve yaw/pitch aiming while ensuring even upward aim descends.
+	_sky_dive_direction.y = minf(_sky_dive_direction.y, -0.35)
+	_sky_dive_direction = _sky_dive_direction.normalized()
+	_sky_dive_sub_phase = 3
+	_sky_dive_attack_armed = false
+	if visuals:
+		visuals.rotation.y = _camera_yaw
+	if anim_player and anim_player.has_animation("Knight_X_SkyDive"):
+		anim_player.speed_scale = 1.0
+		anim_player.play("Knight_X_SkyDive")
+		anim_player.seek(anim_player.get_animation("Knight_X_SkyDive").length * 0.5, true)
+
+
+func _sky_dive_end_dive(action: AbilityAction) -> void:
+	if not is_on_floor() or active_ability_action != action or not action.is_active():
+		return
+	velocity = Vector3(0.0, -0.1, 0.0)
+	_sky_dive_sub_phase = 4
+	if action.current_phase == AbilityAction.Phase.ACTIVE:
+		_execute_ability_effect(action.slot_name, action.data)
+		# Advance the existing lifecycle only after physical floor contact.
+		action.phase_timer = 0.001
+		action.update(0.001)
+
 
 func _check_shield_charge_hit(fwd: Vector3) -> void:
 	if not active_ability_action or active_ability_action.current_phase != AbilityAction.Phase.ACTIVE:
@@ -1296,13 +1679,8 @@ func _apply_shield_charge_impact(target_node: Node, fwd: Vector3) -> void:
 	velocity.z = 0.0
 	if active_ability_action:
 		active_ability_action.phase_timer = 0.001
-		# Calculate a precise stop position with a visual gap (1.0m center-to-center distance)
-		if target_node is Node3D:
-			var target_pos: Vector3 = target_node.global_position
-			var ideal_pos: Vector3 = target_pos - fwd * 1.0
-			global_position = Vector3(ideal_pos.x, global_position.y, ideal_pos.z)
-		else:
-			global_position = _last_global_position
+		# Keep the collision-resolved position; snapping toward the target can
+		# teleport across an obstacle or follow its hit-reaction displacement.
 
 func _execute_ability_effect(slot_name: String, ability: AbilityData) -> void:
 	_orient_attack_direction()
@@ -1425,6 +1803,14 @@ func _execute_next_combo_attack() -> void:
 
 
 func _try_combat_attack() -> bool:
+	if is_control_impaired():
+		return false
+	if wizard_combat:
+		return wizard_combat.start_charge()
+	if archer_combat:
+		return archer_combat.start_charge()
+	if not controls_enabled:
+		return false
 	if combat_state == CombatState.DEAD:
 		return false
 	if _combo_finisher_recovery_timer > 0.0:
@@ -1448,7 +1834,7 @@ func _try_combat_attack() -> bool:
 		return false
 
 	# If in locomotion (IDLE or RUN):
-	if combat_state == CombatState.IDLE or combat_state == CombatState.RUN:
+	if combat_state == CombatState.IDLE or combat_state == CombatState.RUN or combat_state == CombatState.BLOCK:
 		var success: bool = transition_to(CombatState.ATTACK)
 		if success:
 			_combo_step = 1
@@ -1459,6 +1845,14 @@ func _try_combat_attack() -> bool:
 
 
 func _start_block() -> bool:
+	if is_control_impaired():
+		return false
+	if wizard_combat:
+		return wizard_combat.start_block()
+	if archer_combat:
+		return archer_combat.start_block()
+	if not controls_enabled:
+		return false
 	if is_shield_broken or combat_state == CombatState.DEAD or combat_state == CombatState.COUNTER or _combo_finisher_recovery_timer > 0.0 or (active_ability_action and active_ability_action.is_active()):
 		return false
 	return transition_to(CombatState.BLOCK)
@@ -1469,8 +1863,8 @@ func _release_block() -> void:
 		return
 
 	var horiz_sq: float = velocity.x * velocity.x + velocity.z * velocity.z
-	var input_x: float = Input.get_axis("move_left", "move_right")
-	var input_z: float = Input.get_axis("move_forward", "move_backward")
+	var input_x: float = external_move_direction.x if external_controlled else Input.get_axis("move_left", "move_right")
+	var input_z: float = external_move_direction.z if external_controlled else Input.get_axis("move_forward", "move_backward")
 	var is_moving: bool = (abs(input_x) > 0.1 or abs(input_z) > 0.1) or (horiz_sq > 0.05 and _knockback_timer <= 0.0)
 
 	var old_state: CombatState = combat_state
@@ -1496,6 +1890,8 @@ const NO_ATTACKER_POS: Vector3 = Vector3(99999.0, 99999.0, 99999.0)
 
 
 func take_damage(amount_or_payload: Variant, attacker_pos: Vector3 = NO_ATTACKER_POS, incoming_shield_damage: float = 15.0, spawn_feedback: bool = true) -> void:
+	if wizard_combat and wizard_combat.storm.channeling():
+		return
 	if combat_state == CombatState.DEAD:
 		# TEST 16: No damage can be processed after DEAD
 		return
@@ -1596,6 +1992,8 @@ func take_damage(amount_or_payload: Variant, attacker_pos: Vector3 = NO_ATTACKER
 			if spawn_feedback and combat.has_method("spawn_damage_number"):
 				combat.spawn_damage_number(hit_pos, final_damage, false, 0.0)
 
+	if final_damage > 0.0 and archer_combat:
+		archer_combat.end_stealth()
 	var will_die: bool = (health_component and health_component.current_health - final_damage <= 0.0)
 
 	# Apply hit reaction and knockback only if target survives
@@ -1612,6 +2010,8 @@ func take_damage(amount_or_payload: Variant, attacker_pos: Vector3 = NO_ATTACKER
 
 
 func apply_knockback(direction: Vector3, distance: float, duration: float) -> void:
+	if wizard_combat and wizard_combat.storm.channeling():
+		return
 	if combat_state == CombatState.DEAD:
 		return
 	var flat_dir: Vector3 = direction
@@ -1628,6 +2028,11 @@ func apply_knockback(direction: Vector3, distance: float, duration: float) -> vo
 func apply_hit_reaction(hit_dir: Vector3, is_blocked_hit: bool = false) -> void:
 	if combat_state == CombatState.DEAD:
 		return
+	if wizard_combat:
+		wizard_combat.interrupt()
+	if archer_combat:
+		archer_combat.interrupt()
+		archer_combat.end_stealth()
 	_hit_reaction_count += 1
 	# Hit reaction clears queued combo input but cannot bypass finisher recovery.
 	reset_combo(false)
@@ -1796,6 +2201,12 @@ func _restore_shield() -> void:
 
 
 func reset_shield_for_new_round() -> void:
+	if spectacle:
+		spectacle.clear()
+	if frost:
+		frost.clear()
+	if polymorph:
+		polymorph.clear()
 	var was_broken: bool = (shield_state == ShieldState.BROKEN)
 	shield_state = ShieldState.READY
 	_shield_stun_timer = 0.0
@@ -1843,6 +2254,7 @@ func respawn(spawn_pos: Vector3 = Vector3.ZERO, spawn_yaw: float = 0.0) -> void:
 	if active_ability_action:
 		active_ability_action.cancel()
 		active_ability_action = null
+	_clear_sky_dive_state()
 	if ability_system:
 		ability_system.reset_cooldowns()
 	CombatTimeManager.reset_time()
@@ -1878,6 +2290,16 @@ func respawn(spawn_pos: Vector3 = Vector3.ZERO, spawn_yaw: float = 0.0) -> void:
 
 
 func _on_health_died() -> void:
+	if spectacle:
+		spectacle.clear()
+	if frost:
+		frost.clear()
+	if polymorph:
+		polymorph.clear()
+	if wizard_combat:
+		wizard_combat.reset()
+	if archer_combat:
+		archer_combat.reset()
 	if combat_feedback:
 		combat_feedback.play_audio_event("death")
 	transition_to(CombatState.DEAD)
@@ -1928,6 +2350,8 @@ func _on_animation_finished(anim_name: StringName) -> void:
 
 
 func _update_locomotion_animations() -> void:
+	if active_ability_action and active_ability_action.is_active() and active_ability_action.data and active_ability_action.data.id in ["sky_dive", "whirling_blade", "giant_sword_ultimate"]:
+		return
 	if not anim_player or combat_state == CombatState.DEAD or combat_state == CombatState.ATTACK or combat_state == CombatState.BLOCK or combat_state == CombatState.DODGE:
 		return
 
@@ -1971,6 +2395,10 @@ func _setup_animation_player() -> void:
 				_neck_bone_idx = _skeleton.find_bone("neck")
 
 	if anim_player:
+		if hero_profile == "knight":
+			var c_animation: Animation = preload("res://assets/animations/knight_c_whirling_blade.tres")
+			anim_player.get_animation_library("").add_animation("Knight_C_WhirlingBlade", c_animation)
+			anim_player.get_animation_library("").add_animation("Knight_V_GiantSword", preload("res://assets/animations/knight_v_giant_sword.tres"))
 		# Configure loop modes for locomotion and combat
 		if anim_player.has_animation("idle"):
 			anim_player.get_animation("idle").loop_mode = Animation.LOOP_LINEAR
@@ -2030,6 +2458,10 @@ func _update_head_visibility() -> void:
 
 
 func _set_mouse_captured(captured: bool) -> void:
+	if not captured and wizard_combat:
+		wizard_combat.interrupt()
+	if not captured and archer_combat:
+		archer_combat.interrupt()
 	_is_mouse_captured = captured
 	if captured:
 		Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
@@ -2071,3 +2503,7 @@ func _add_mouse_button_if_missing(action: StringName, button_index: MouseButton)
 		var event: InputEventMouseButton = InputEventMouseButton.new()
 		event.button_index = button_index
 		InputMap.action_add_event(action, event)
+
+
+func is_control_impaired() -> bool:
+	return (polymorph and polymorph.active()) or (frost and frost.active())

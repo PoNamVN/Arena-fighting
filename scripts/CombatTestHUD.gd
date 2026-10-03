@@ -78,6 +78,44 @@ func _process(_delta: float) -> void:
 	if not player:
 		return
 		
+	if player.wizard_combat:
+		shield_bar.get_parent().visible = true
+		shield_label.text = "KHIÊN PHÉP: %d / %d" % [player.shield_durability, player.shield_max_durability]
+		break_banner.text = "KHIÊN PHÉP BỊ PHÁ VỠ"
+		low_shield_warning.text = "ĐỘ BỀN KHIÊN PHÉP THẤP"
+		status_label.text = "PHÙ THỦY NGUYÊN TỐ"
+		abilities_label.text = ""
+		for slot: String in ["skill_1", "skill_2", "skill_3", "ultimate"]:
+			var ability: AbilityData = player.ability_system.get_ability(slot)
+			var cd: float = player.ability_system.get_cooldown_remaining(slot)
+			abilities_label.text += "%s %s: %s · %d NL\n" % [{"skill_1": "Z", "skill_2": "X", "skill_3": "C", "ultimate": "V"}[slot], ability.display_name, "%.1fs" % cd if cd > 0 else ("Sẵn sàng" if player.stamina_component.has_enough_stamina(ability.stamina_cost) else "Thiếu NL"), ability.stamina_cost]
+		if player.wizard_combat.storm.channeling():
+			status_label.text = "BÃO SÉT · KHIÊN MIỄN SÁT THƯƠNG"
+		var wizard_tip: Label = get_node_or_null("RootControl/ControlsTip") as Label
+		if wizard_tip:
+			wizard_tip.hide()
+		return
+	if player.archer_combat:
+		shield_bar.get_parent().visible = true
+		shield_label.text = "ĐỘ BỀN CUNG: %d / %d" % [player.shield_durability, player.shield_max_durability]
+		if break_banner:
+			break_banner.text = "CUNG BỊ ĐÁNH BẬT"
+		if low_shield_warning:
+			low_shield_warning.text = "ĐỘ BỀN CUNG THẤP"
+		status_label.text = "CUNG BỊ BẬT · %.1fs" % player.shield_recovery_time_remaining if player.is_shield_broken else "CUNG THỦ RỪNG"
+		var cooldown: float = player.ability_system.get_cooldown_remaining("skill_1")
+		var z_status: String = "%.1fs" % cooldown if cooldown > 0 else ("Sẵn sàng" if player.stamina_component.has_enough_stamina(25.0) else "Thiếu năng lượng")
+		abilities_label.text = "Z Loạt tên: %s · 25 NL" % z_status
+		for slot: String in ["skill_2", "skill_3"]:
+			var ability: AbilityData = player.ability_system.get_ability(slot)
+			var remaining: float = player.ability_system.get_cooldown_remaining(slot)
+			var state: String = "%.1fs" % remaining if remaining > 0.0 else ("Sẵn sàng" if player.stamina_component.has_enough_stamina(ability.stamina_cost) else "Thiếu năng lượng")
+			abilities_label.text += "\n%s %s: %s · %d NL" % ["X" if slot == "skill_2" else "C", ability.display_name, state, ability.stamina_cost]
+		abilities_label.text += "\nV Mồi T-rex: %s · 100 NL" % ("Sẵn sàng" if player.stamina_component.is_full() and not player.archer_combat.bait_ultimate.active() else "Đang thi triển" if player.archer_combat.bait_ultimate.active() else "Cần đầy năng lượng")
+		var tip: Label = get_node_or_null("RootControl/ControlsTip") as Label
+		if tip:
+			tip.hide()
+		return
 	# Update shield status countdown while broken
 	if player.is_shield_broken:
 		var time_left: float = player.shield_recovery_time_remaining

@@ -20,12 +20,34 @@ func assert_true(cond: bool, msg: String) -> void:
 		print("[FAIL] %s" % msg)
 
 
+func _step(count: int = 1) -> void:
+	for frame: int in range(count):
+		await physics_frame
+		await process_frame
+
+
+func _wait_ability_finished(player: PlayerController) -> bool:
+	for frame: int in range(300):
+		if player.active_ability_action == null:
+			return true
+		await _step()
+	assert_true(false, "Ability lifecycle timed out")
+	return false
+
+
 func _run_all_tests() -> void:
+	# Headless default viewport is tiny; the real HUD otherwise consumes the click.
+	root.size = Vector2i(1152, 720)
 	var arena_scene: PackedScene = load("res://scenes/CombatTestArena.tscn")
 	var arena: Node3D = arena_scene.instantiate()
 	root.add_child(arena)
 	await process_frame
 	await process_frame
+
+	var arena_attacker: Node = arena.get_node_or_null("AttackTrainingDummy")
+	if arena_attacker:
+		arena_attacker.set_physics_process(false)
+		arena_attacker.set_process(false)
 
 	var p: PlayerController = arena.find_child("Player", true, false) as PlayerController
 	assert_true(p != null, "TEST 1: Player initialized in arena")
@@ -105,7 +127,7 @@ func _run_all_tests() -> void:
 	# ----------------------------------------------------
 	# SECTION 3: DODGE TRANSITIONS & I-FRAME INTEGRATION
 	# ----------------------------------------------------
-	# Ensure stamina headroom for dodge (-20) and perfect dodge (+25)
+	# Ensure stamina headroom for zero-cost dodge and perfect dodge (+25)
 	sc.current_stamina = 50.0
 	var stamina_before_dodge: float = sc.current_stamina
 	p._try_dodge()
@@ -146,11 +168,37 @@ func _run_all_tests() -> void:
 	assert_true(asys.get_cooldown_remaining("skill_1") > 0.0, "TEST 25: Skill 1 cooldown running")
 	assert_true(asys.get_cooldown_remaining("skill_2") == 0.0, "TEST 26: Skill 2 cooldown independent (0.0)")
 
+	# Another ability cannot interrupt Z, even at full stamina.
+	sc.current_stamina = 100.0
+	assert_true(not p._try_cast_ability("ultimate") and sc.current_stamina == 100.0, "Active Z rejects V without spending")
+	if not await _wait_ability_finished(p):
+		quit(1)
+		return
+	assert_true(p.active_ability_action == null and not p.is_shield_enlarged, "Z recovery naturally releases action and giant shield")
+
 	# Ultimate test at full stamina
 	sc.current_stamina = 100.0
 	var cast_ult: bool = p._try_cast_ability("ultimate")
 	assert_true(cast_ult, "TEST 27: Ultimate executed at 100 stamina")
 	assert_true(sc.current_stamina == 0.0, "TEST 28: Ultimate consumed 100 stamina")
+
+	assert_true(p.giant_sword_ultimate.aiming, "V enters ground targeting after Z completes")
+	await _step(35)
+	var click: InputEventMouseButton = InputEventMouseButton.new()
+	click.button_index = MOUSE_BUTTON_LEFT
+	click.position = p.giant_sword_ultimate.cinematic_camera.unproject_position(p.global_position)
+	click.pressed = true
+	Input.parse_input_event(click)
+	Input.flush_buffered_events()
+	await _step()
+	click.pressed = false
+	Input.parse_input_event(click)
+	Input.flush_buffered_events()
+	assert_true(not p.giant_sword_ultimate.aiming and not p.is_attacking and p._combo_step == 0, "LMB confirms V without starting a basic attack")
+	if not await _wait_ability_finished(p):
+		quit(1)
+		return
+	assert_true(p.camera.current and not p.combat.giant_sword_vfx.visible and p._is_mouse_captured, "V naturally restores gameplay camera, cursor and input")
 
 	# ----------------------------------------------------
 	# SECTION 5: PERSPECTIVE TOGGLE (FPS / TPS)

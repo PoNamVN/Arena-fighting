@@ -86,8 +86,8 @@ func _run_test_suite() -> void:
 	# -----------------------------------------------------------------
 	# TEST 4: Existing TrainingDummy automatically resets to full HP
 	# -----------------------------------------------------------------
-	# Default reset_delay is 1.0s. Wait 1.25s
-	await create_timer(1.25).timeout
+	# Wait for auto reset
+	await create_timer(_training_dummy.reset_delay + 0.25).timeout
 	var hp_after_reset: float = _training_dummy.health_component.current_health
 	var is_dead_after_reset: bool = _training_dummy.health_component.is_dead()
 	var t4_pass: bool = abs(hp_after_reset - 100.0) < 0.01 and (not is_dead_after_reset)

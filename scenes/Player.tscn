@@ -2,7 +2,7 @@
 
 [ext_resource type="Script" path="res://scripts/PlayerController.gd" id="1_controller"]
 [ext_resource type="Script" path="res://scripts/PlayerCombat.gd" id="2_combat"]
-[ext_resource type="PackedScene" uid="uid://cjdsemtu0ldhu" path="res://assets/models/player_character.glb" id="3_character"]
+[ext_resource type="PackedScene" path="res://assets/models/knight_k3.glb" id="3_character"]
 [ext_resource type="Script" path="res://scripts/HealthComponent.gd" id="4_health"]
 
 [ext_resource type="PackedScene" uid="uid://c3u0yq6w5a2k1" path="res://scenes/SlashArcVFX.tscn" id="5_slash_arc"]
@@ -17,6 +17,11 @@
 [ext_resource type="Script" path="res://scripts/DodgeController.gd" id="13_dodge"]
 [ext_resource type="Script" path="res://scripts/AbilitySystem.gd" id="14_ability"]
 [ext_resource type="Script" path="res://scripts/CombatTimeManager.gd" id="15_time_mgr"]
+[ext_resource type="Script" path="res://scripts/WhirlingBladeVFX.gd" id="16_whirling"]
+
+[ext_resource type="Script" path="res://scripts/GiantSwordVFX.gd" id="17_giant_sword"]
+
+[ext_resource type="Script" path="res://scripts/GiantSwordUltimate.gd" id="18_ultimate"]
 
 [sub_resource type="CapsuleShape3D" id="CapsuleShape3D_body"]
 radius = 0.4
@@ -42,6 +47,21 @@ shape = SubResource("CapsuleShape3D_body")
 
 [node name="CharacterModel" parent="Visuals" instance=ExtResource("3_character")]
 
+
+[node name="SwordAttachment" type="BoneAttachment3D" parent="Visuals/CharacterModel/Gladiator_Armature/Skeleton3D"]
+bone_name = "hand.R"
+
+[node name="Socket_SwordBase" type="Marker3D" parent="Visuals/CharacterModel/Gladiator_Armature/Skeleton3D/SwordAttachment"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 1.07702508e-09, 0.07000005117, 0.07499998792)
+
+[node name="Socket_SwordTip" type="Marker3D" parent="Visuals/CharacterModel/Gladiator_Armature/Skeleton3D/SwordAttachment"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -4.503979467e-08, 0.07000004338, 0.5299999563)
+
+[node name="ShieldAttachment" type="BoneAttachment3D" parent="Visuals/CharacterModel/Gladiator_Armature/Skeleton3D"]
+bone_name = "forearm.L"
+
+[node name="Socket_ShieldCenter" type="Marker3D" parent="Visuals/CharacterModel/Gladiator_Armature/Skeleton3D/ShieldAttachment"]
+transform = Transform3D(-8.498074422e-08, -1.711428027e-08, 1, 1.161486164e-15, -1, -1.711428027e-08, 1, -2.928981102e-16, 8.498074422e-08, 0.2910000086, 0.1399999559, 7.44398452e-09)
 [node name="CameraPivot" type="Node3D" parent="."]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.62, 0)
 
@@ -58,6 +78,9 @@ fov = 75.0
 [node name="PlayerCombat" type="Node3D" parent="."]
 script = ExtResource("2_combat")
 
+[node name="WhirlingBladeVFX" type="Node3D" parent="PlayerCombat"]
+script = ExtResource("16_whirling")
+
 [node name="VisualSlashCue" type="Node3D" parent="PlayerCombat"]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0)
 visible = false
@@ -66,6 +89,8 @@ visible = false
 mesh = SubResource("BoxMesh_slash")
 
 [node name="SlashArcVFX" parent="PlayerCombat" instance=ExtResource("5_slash_arc")]
+sword_base_socket = NodePath("../../Visuals/CharacterModel/Gladiator_Armature/Skeleton3D/SwordAttachment/Socket_SwordBase")
+sword_tip_socket = NodePath("../../Visuals/CharacterModel/Gladiator_Armature/Skeleton3D/SwordAttachment/Socket_SwordTip")
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0)
 visible = false
 
@@ -74,10 +99,12 @@ transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0)
 visible = false
 
 [node name="BlockImpactVFX" parent="PlayerCombat" instance=ExtResource("7_block_impact")]
+shield_center_socket = NodePath("../../Visuals/CharacterModel/Gladiator_Armature/Skeleton3D/ShieldAttachment/Socket_ShieldCenter")
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0)
 visible = false
 
 [node name="ShieldBreakVFX" parent="PlayerCombat" instance=ExtResource("8_shield_break")]
+shield_center_socket = NodePath("../../Visuals/CharacterModel/Gladiator_Armature/Skeleton3D/ShieldAttachment/Socket_ShieldCenter")
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0)
 visible = false
 
@@ -102,3 +129,9 @@ script = ExtResource("14_ability")
 
 [node name="CombatTimeManager" type="Node" parent="."]
 script = ExtResource("15_time_mgr")
+
+[node name="GiantSwordVFX" type="Node3D" parent="PlayerCombat"]
+script = ExtResource("17_giant_sword")
+
+[node name="GiantSwordUltimate" type="Node" parent="."]
+script = ExtResource("18_ultimate")

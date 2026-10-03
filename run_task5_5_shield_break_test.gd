@@ -306,7 +306,7 @@ func _run_tests() -> void:
 	# -----------------------------------------------------------------
 	# TEST 17: Existing attack behavior remains functional
 	# -----------------------------------------------------------------
-	# Attack while in broken recovery (after stun)
+	# Broken shield rejects attacks even after stun, until recovery is complete.
 	p.health_component.current_health = 100.0
 	p.break_shield()
 	p._shield_stun_timer = 0.0 # Stun ended, recovery still active
@@ -329,7 +329,7 @@ func _run_tests() -> void:
 		combat._physics_process(0.05)
 		await process_frame
 
-	var t17_pass: bool = can_atk_in_rec and is_in_atk and normal_atk_attempt and normal_is_in_atk
+	var t17_pass: bool = not can_atk_in_rec and not is_in_atk and normal_atk_attempt and normal_is_in_atk
 	_record_result("TEST 17: Existing attack behavior remains functional", t17_pass,
 		"Atk in rec: %s (state=%s), Normal atk: %s (state=%s)" % [can_atk_in_rec, is_in_atk, normal_atk_attempt, normal_is_in_atk])
 

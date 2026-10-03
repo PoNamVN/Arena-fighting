@@ -342,6 +342,13 @@ func _run_test_suite() -> void:
 	p._release_block()
 	while p._block_transition != "" or p.combat_state == PlayerController.CombatState.BLOCK:
 		await process_frame
+	# Earlier damage can leave recoil velocity until the next physics updates.
+	# Wait for actual locomotion to settle after release, rather than sample between callbacks.
+	for frame in range(60):
+		await physics_frame
+		await process_frame
+		if p.combat_state == PlayerController.CombatState.IDLE and p._knockback_timer <= 0.0:
+			break
 	var block_released_cleanly: bool = (p.combat_state == PlayerController.CombatState.IDLE)
 	
 	var t14_pass: bool = block_rejected_at_zero and block_started_after_restore and block_released_cleanly
