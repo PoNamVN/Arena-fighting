@@ -1,0 +1,9 @@
+[gd_resource type="StandardMaterial3D" format=3]
+
+[resource]
+resource_name = "Mat_Gladiator_Bronze.001"
+cull_mode = 2
+albedo_color = Color(0.658823, 0.392157, 0.164706, 1)
+roughness = 0.8
+rim = 0.0
+rim_tint = 0.25

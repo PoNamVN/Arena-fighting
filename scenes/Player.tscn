@@ -1,4 +1,4 @@
-[gd_scene load_steps=9 format=3 uid="uid://c5q0q5i3r8d1x"]
+[gd_scene load_steps=16 format=3 uid="uid://c5q0q5i3r8d1x"]
 
 [ext_resource type="Script" path="res://scripts/PlayerController.gd" id="1_controller"]
 [ext_resource type="Script" path="res://scripts/PlayerCombat.gd" id="2_combat"]
@@ -22,6 +22,14 @@
 [ext_resource type="Script" path="res://scripts/GiantSwordVFX.gd" id="17_giant_sword"]
 
 [ext_resource type="Script" path="res://scripts/GiantSwordUltimate.gd" id="18_ultimate"]
+
+[ext_resource type="Material" path="res://test/lookdev/materials/Skin.tres" id="L1_Skin"]
+[ext_resource type="Material" path="res://test/lookdev/materials/Tunic.tres" id="L1_Tunic"]
+[ext_resource type="Material" path="res://test/lookdev/materials/Leather.tres" id="L1_Leather"]
+[ext_resource type="Material" path="res://test/lookdev/materials/Bronze.tres" id="L1_Bronze"]
+[ext_resource type="Material" path="res://test/lookdev/materials/Steel.tres" id="L1_Steel"]
+[ext_resource type="Material" path="res://test/lookdev/materials/Crest.tres" id="L1_Crest"]
+[ext_resource type="Material" path="res://test/lookdev/materials/Gold.tres" id="L1_Gold"]
 
 [sub_resource type="CapsuleShape3D" id="CapsuleShape3D_body"]
 radius = 0.4
@@ -47,6 +55,27 @@ shape = SubResource("CapsuleShape3D_body")
 
 [node name="CharacterModel" parent="Visuals" instance=ExtResource("3_character")]
 
+
+[node name="Gladiator_Mesh" parent="Visuals/CharacterModel/Gladiator_Armature/Skeleton3D"]
+surface_material_override/0 = ExtResource("L1_Skin")
+surface_material_override/1 = ExtResource("L1_Tunic")
+surface_material_override/2 = ExtResource("L1_Leather")
+surface_material_override/3 = ExtResource("L1_Steel")
+surface_material_override/4 = ExtResource("L1_Crest")
+surface_material_override/5 = ExtResource("L1_Gold")
+
+
+[node name="Gladiator_Shield" parent="Visuals/CharacterModel/Gladiator_Armature/Skeleton3D"]
+surface_material_override/0 = ExtResource("L1_Leather")
+surface_material_override/1 = ExtResource("L1_Bronze")
+surface_material_override/2 = ExtResource("L1_Steel")
+surface_material_override/3 = ExtResource("L1_Gold")
+
+
+[node name="Gladiator_Sword" parent="Visuals/CharacterModel/Gladiator_Armature/Skeleton3D"]
+surface_material_override/0 = ExtResource("L1_Leather")
+surface_material_override/1 = ExtResource("L1_Steel")
+surface_material_override/2 = ExtResource("L1_Gold")
 
 [node name="SwordAttachment" type="BoneAttachment3D" parent="Visuals/CharacterModel/Gladiator_Armature/Skeleton3D"]
 bone_name = "hand.R"

@@ -1,0 +1,51 @@
+[gd_resource type="Resource" load_steps=5 format=3]
+
+[ext_resource type="Script" path="res://test/lookdev/knight_lighting_preset.gd" id="1_d6u5v"]
+
+[sub_resource type="ProceduralSkyMaterial" id="ProceduralSkyMaterial_qu743"]
+sky_top_color = Color(0.65, 0.65, 0.65, 1)
+sky_horizon_color = Color(0.607059, 0.485647, 0.409411, 1)
+sky_curve = 0.12
+sky_energy_multiplier = 0.85
+ground_bottom_color = Color(0.72, 0.72, 0.72, 1)
+ground_horizon_color = Color(0.568627, 0.454902, 0.411765, 1)
+sun_angle_max = 4.0
+sun_curve = 0.08
+
+[sub_resource type="Sky" id="Sky_6n4hk"]
+sky_material = SubResource("ProceduralSkyMaterial_qu743")
+process_mode = 1
+radiance_size = 2
+
+[sub_resource type="Environment" id="Environment_mr2v7"]
+background_mode = 2
+sky = SubResource("Sky_6n4hk")
+ambient_light_source = 2
+ambient_light_color = Color(0.98, 0.96, 0.92, 1)
+ambient_light_sky_contribution = 0.0
+ambient_light_energy = 1.2
+reflected_light_source = 2
+tonemap_mode = 3
+tonemap_white = 6.0
+tonemap_exposure = 0.8
+glow_enabled = true
+glow_levels/3 = 0.7
+glow_levels/5 = 0.0
+glow_intensity = 0.12
+glow_strength = 0.65
+glow_hdr_threshold = 3.0
+
+[resource]
+script = ExtResource("1_d6u5v")
+label = "Sunset"
+environment = SubResource("Environment_mr2v7")
+key_color = Color(1, 0.741176, 0.513726, 1)
+key_energy = 0.25
+key_rotation = Vector3(-22, 125, 0)
+rim_color = Color(0.95, 0.97, 1, 1)
+rim_energy = 0.04
+show_sky = true
+backdrop_color = Color(0.196078, 0.168627, 0.188235, 1)
+floor_color = Color(0.48, 0.43, 0.34, 1)
+fill_color = Color(0.88, 0.92, 1, 1)
+fill_energy = 0.03

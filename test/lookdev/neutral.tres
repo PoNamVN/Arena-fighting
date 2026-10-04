@@ -1,0 +1,51 @@
+[gd_resource type="Resource" load_steps=5 format=3]
+
+[ext_resource type="Script" path="res://test/lookdev/knight_lighting_preset.gd" id="1_dps8d"]
+
+[sub_resource type="ProceduralSkyMaterial" id="ProceduralSkyMaterial_in8j6"]
+sky_top_color = Color(0.65, 0.65, 0.65, 1)
+sky_horizon_color = Color(0.624, 0.624, 0.624, 1)
+sky_curve = 0.12
+sky_energy_multiplier = 0.85
+ground_bottom_color = Color(0.72, 0.72, 0.72, 1)
+ground_horizon_color = Color(0.537255, 0.537255, 0.537255, 1)
+sun_angle_max = 4.0
+sun_curve = 0.08
+
+[sub_resource type="Sky" id="Sky_8wsix"]
+sky_material = SubResource("ProceduralSkyMaterial_in8j6")
+process_mode = 1
+radiance_size = 2
+
+[sub_resource type="Environment" id="Environment_cf6nn"]
+background_mode = 2
+sky = SubResource("Sky_8wsix")
+ambient_light_source = 2
+ambient_light_color = Color(0.96, 0.96, 0.96, 1)
+ambient_light_sky_contribution = 0.0
+ambient_light_energy = 1.2
+reflected_light_source = 2
+tonemap_mode = 3
+tonemap_white = 6.0
+tonemap_exposure = 0.8
+glow_enabled = true
+glow_levels/3 = 0.7
+glow_levels/5 = 0.0
+glow_intensity = 0.12
+glow_strength = 0.65
+glow_hdr_threshold = 3.0
+
+[resource]
+script = ExtResource("1_dps8d")
+label = "Neutral"
+environment = SubResource("Environment_cf6nn")
+key_color = Color(1, 1, 1, 1)
+key_energy = 0.25
+key_rotation = Vector3(-48, 145, 0)
+rim_color = Color(1, 1, 1, 1)
+rim_energy = 0.04
+show_sky = false
+backdrop_color = Color(0.580392, 0.580392, 0.580392, 1)
+floor_color = Color(0.521569, 0.521569, 0.521569, 1)
+fill_color = Color(1, 1, 1, 1)
+fill_energy = 0.03

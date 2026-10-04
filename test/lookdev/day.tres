@@ -1,0 +1,51 @@
+[gd_resource type="Resource" load_steps=5 format=3]
+
+[ext_resource type="Script" path="res://test/lookdev/knight_lighting_preset.gd" id="1_exh1g"]
+
+[sub_resource type="ProceduralSkyMaterial" id="ProceduralSkyMaterial_dt8h5"]
+sky_top_color = Color(0.65, 0.65, 0.65, 1)
+sky_horizon_color = Color(0.640941, 0.643765, 0.649412, 1)
+sky_curve = 0.12
+sky_energy_multiplier = 0.85
+ground_bottom_color = Color(0.72, 0.72, 0.72, 1)
+ground_horizon_color = Color(0.643137, 0.619608, 0.588235, 1)
+sun_angle_max = 4.0
+sun_curve = 0.08
+
+[sub_resource type="Sky" id="Sky_e4b2w"]
+sky_material = SubResource("ProceduralSkyMaterial_dt8h5")
+process_mode = 1
+radiance_size = 2
+
+[sub_resource type="Environment" id="Environment_wqbqs"]
+background_mode = 2
+sky = SubResource("Sky_e4b2w")
+ambient_light_source = 2
+ambient_light_color = Color(0.98, 0.96, 0.92, 1)
+ambient_light_sky_contribution = 0.0
+ambient_light_energy = 1.2
+reflected_light_source = 2
+tonemap_mode = 3
+tonemap_white = 6.0
+tonemap_exposure = 0.8
+glow_enabled = true
+glow_levels/3 = 0.7
+glow_levels/5 = 0.0
+glow_intensity = 0.12
+glow_strength = 0.65
+glow_hdr_threshold = 3.0
+
+[resource]
+script = ExtResource("1_exh1g")
+label = "Day"
+environment = SubResource("Environment_wqbqs")
+key_color = Color(1, 0.886275, 0.721569, 1)
+key_energy = 0.25
+key_rotation = Vector3(-48, 145, 0)
+rim_color = Color(0.95, 0.97, 1, 1)
+rim_energy = 0.04
+show_sky = true
+backdrop_color = Color(0.164706, 0.176471, 0.196078, 1)
+floor_color = Color(0.788235, 0.705882, 0.541176, 1)
+fill_color = Color(0.88, 0.92, 1, 1)
+fill_energy = 0.03

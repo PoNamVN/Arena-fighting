@@ -1,0 +1,139 @@
+[gd_scene load_steps=19 format=3]
+[ext_resource type="Script" path="res://test/lookdev/knight_lookdev.gd" id="1"]
+[ext_resource type="PackedScene" path="res://assets/models/knight_k3.glb" id="2"]
+[ext_resource type="Resource" path="res://test/lookdev/day.tres" id="3"]
+[ext_resource type="Material" path="res://test/lookdev/materials/Skin.tres" id="L1_Skin"]
+[ext_resource type="Material" path="res://test/lookdev/materials/Tunic.tres" id="L1_Tunic"]
+[ext_resource type="Material" path="res://test/lookdev/materials/Leather.tres" id="L1_Leather"]
+[ext_resource type="Material" path="res://test/lookdev/materials/Bronze.tres" id="L1_Bronze"]
+[ext_resource type="Material" path="res://test/lookdev/materials/Steel.tres" id="L1_Steel"]
+[ext_resource type="Material" path="res://test/lookdev/materials/Crest.tres" id="L1_Crest"]
+[ext_resource type="Material" path="res://test/lookdev/materials/Gold.tres" id="L1_Gold"]
+[sub_resource type="StandardMaterial3D" id="Sand"]
+albedo_color = Color(0.48, 0.43, 0.34, 1)
+roughness = 0.98
+[sub_resource type="PlaneMesh" id="Floor"]
+material = SubResource("Sand")
+size = Vector2(60, 60)
+[sub_resource type="StandardMaterial3D" id="Stone"]
+albedo_color = Color(0.32, 0.32, 0.32, 1)
+roughness = 0.9
+[sub_resource type="CylinderMesh" id="Plinth"]
+material = SubResource("Stone")
+top_radius = 1.2
+bottom_radius = 1.26
+height = 0.08
+radial_segments = 24
+rings = 1
+[sub_resource type="BoxMesh" id="StoneBlock"]
+material = SubResource("Stone")
+size = Vector3(0.5, 0.12, 0.4)
+[sub_resource type="StandardMaterial3D" id="ReflectionCardMaterial"]
+shading_mode = 0
+cull_mode = 2
+albedo_color = Color(0.95, 0.95, 0.95, 1)
+[sub_resource type="QuadMesh" id="ReflectionCardMesh"]
+material = SubResource("ReflectionCardMaterial")
+size = Vector2(2.6, 2.0)
+[sub_resource type="Environment" id="Placeholder"]
+background_mode = 1
+background_color = Color(0.16, 0.19, 0.22, 1)
+[node name="KnightLookdev" type="Node3D"]
+script = ExtResource("1")
+[node name="Knight" parent="." instance=ExtResource("2")]
+position = Vector3(0, 0.04, 0)
+
+[node name="Gladiator_Mesh" parent="Knight/Gladiator_Armature/Skeleton3D"]
+surface_material_override/0 = ExtResource("L1_Skin")
+surface_material_override/1 = ExtResource("L1_Tunic")
+surface_material_override/2 = ExtResource("L1_Leather")
+surface_material_override/3 = ExtResource("L1_Steel")
+surface_material_override/4 = ExtResource("L1_Crest")
+surface_material_override/5 = ExtResource("L1_Gold")
+
+[node name="Gladiator_Shield" parent="Knight/Gladiator_Armature/Skeleton3D"]
+surface_material_override/0 = ExtResource("L1_Leather")
+surface_material_override/1 = ExtResource("L1_Bronze")
+surface_material_override/2 = ExtResource("L1_Steel")
+surface_material_override/3 = ExtResource("L1_Gold")
+
+[node name="Gladiator_Sword" parent="Knight/Gladiator_Armature/Skeleton3D"]
+surface_material_override/0 = ExtResource("L1_Leather")
+surface_material_override/1 = ExtResource("L1_Steel")
+surface_material_override/2 = ExtResource("L1_Gold")
+
+[node name="Floor" type="MeshInstance3D" parent="."]
+position = Vector3(0, -0.04, 0)
+mesh = SubResource("Floor")
+[node name="StonePlinth" type="MeshInstance3D" parent="."]
+mesh = SubResource("Plinth")
+[node name="StoneA" type="MeshInstance3D" parent="."]
+position = Vector3(-1.7, 0.02, 0.3)
+rotation = Vector3(0, 0.35, 0)
+mesh = SubResource("StoneBlock")
+[node name="StoneB" type="MeshInstance3D" parent="."]
+position = Vector3(1.7, 0.02, -0.9)
+rotation = Vector3(0, -0.28, 0)
+mesh = SubResource("StoneBlock")
+[node name="ReflectionCard" type="MeshInstance3D" parent="."]
+position = Vector3(0.2, 1.5, -2.8)
+layers = 4
+cast_shadow = 0
+mesh = SubResource("ReflectionCardMesh")
+[node name="ReflectionProbe" type="ReflectionProbe" parent="."]
+position = Vector3(0, 1.1, 0)
+size = Vector3(6, 4, 6)
+cull_mask = 4
+ambient_mode = 0
+enable_shadows = false
+update_mode = 0
+[node name="WorldEnvironment" type="WorldEnvironment" parent="."]
+environment = SubResource("Placeholder")
+[node name="Key" type="DirectionalLight3D" parent="."]
+rotation_degrees = Vector3(-48, 145, 0)
+light_color = Color(1, 0.94, 0.81, 1)
+light_specular = 0.2
+light_energy = 1.65
+sky_mode = 1
+shadow_enabled = true
+directional_shadow_mode = 0
+directional_shadow_max_distance = 12.0
+[node name="Fill" type="DirectionalLight3D" parent="."]
+rotation_degrees = Vector3(-25, -35, 0)
+light_color = Color(0.66, 0.70, 1, 1)
+light_specular = 0.0
+light_energy = 0.35
+shadow_enabled = false
+sky_mode = 1
+[node name="Rim" type="OmniLight3D" parent="."]
+position = Vector3(0.8, 2.3, 1.2)
+light_color = Color(0.48, 0.68, 1, 1)
+light_specular = 0.2
+light_energy = 1.0
+shadow_enabled = false
+omni_range = 4.0
+omni_attenuation = 2.0
+[node name="Camera3D" type="Camera3D" parent="."]
+cull_mask = 1048571
+position = Vector3(2.8, 1.95, 2.8)
+current = true
+fov = 34.0
+near = 0.05
+far = 80.0
+[node name="UI" type="CanvasLayer" parent="."]
+[node name="Panel" type="PanelContainer" parent="UI"]
+offset_left = 16.0
+offset_top = 16.0
+offset_right = 360.0
+[node name="Margin" type="MarginContainer" parent="UI/Panel"]
+theme_override_constants/margin_left = 12
+theme_override_constants/margin_right = 12
+theme_override_constants/margin_top = 12
+theme_override_constants/margin_bottom = 12
+[node name="VBox" type="VBoxContainer" parent="UI/Panel/Margin"]
+[node name="Title" type="Label" parent="UI/Panel/Margin/VBox"]
+text = "KNIGHT / LOOK-DEV"
+[node name="Status" type="Label" parent="UI/Panel/Margin/VBox"]
+text = "Loading..."
+[node name="Preset" type="OptionButton" parent="UI/Panel/Margin/VBox"]
+
