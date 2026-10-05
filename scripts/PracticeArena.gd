@@ -2,7 +2,7 @@ class_name PracticeArena
 extends Node3D
 
 const PLAYER_SCENE: PackedScene = preload("res://scenes/Player.tscn")
-enum RoundState { COUNTDOWN, FIGHT, FINISHED }
+enum RoundState { COUNTDOWN, FIGHT, FINISHED, ENDING }
 static var selected_hero: String = "knight"
 static var selected_difficulty: int = PracticeOpponent.Difficulty.NORMAL
 @export var round_duration: float = 90.0
@@ -23,6 +23,12 @@ var abilities_label: Label
 var result_buttons: HBoxContainer
 var back_button: Button
 var _start_banner_time: float = 0.0
+const FINISH_WATCHDOG_SECONDS:float=8.0
+const FINISH_SETTLE_SECONDS:float=.35
+var _finish_started_usec:int=0
+var _finish_idle_usec:int=0
+var _result_player_hp:float=-1.0
+var _result_opponent_hp:float=-1.0
 
 
 func _ready() -> void:
@@ -108,11 +114,68 @@ func _begin_fight() -> void:
 
 
 func _schedule_finish() -> void:
-	_finish_round.call_deferred()
+	if round_state != RoundState.FIGHT:
+		return
+	# Freeze the result immediately, while the killing action is still on its impact frame.
+	_result_player_hp=player.health_component.current_health
+	_result_opponent_hp=opponent.health_component.current_health
+	round_state=RoundState.ENDING
+	brain.enabled=false
+	center_label.hide()
+	_finish_started_usec=Time.get_ticks_usec()
+	for actor:PlayerController in [player,opponent]:
+		actor.external_controlled=true
+		actor.external_move_direction=Vector3.ZERO
+		actor._combo_buffer=0
+		actor.health_component.ability_invulnerable=true
+		# Do not disable controls_enabled: that would stop skill physics and Z restoration.
+		actor.set_process_unhandled_input(false)
+		for node:Node in actor.find_children("*","Node",true,false):
+			node.set_process_unhandled_input(false)
+	_await_finish_presentation.call_deferred()
+
+
+func _finishing_presentation_busy() -> bool:
+	for actor:PlayerController in [player,opponent]:
+		if actor.is_dead:
+			continue
+		if actor.active_ability_action and actor.active_ability_action.is_active():
+			return true
+		if actor.combat_state in [PlayerController.CombatState.ATTACK,PlayerController.CombatState.COUNTER]:
+			return true
+		if actor.giant_sword_ultimate and actor.giant_sword_ultimate._presentation_active:
+			return true
+		if actor.archer_combat and actor.archer_combat.bait_ultimate.active():
+			return true
+		if actor.wizard_combat and actor.wizard_combat.storm.active():
+			return true
+	return false
+
+
+func _await_finish_presentation() -> void:
+	# An idle kill needs no artificial delay; keep the existing immediate result path.
+	if not _finishing_presentation_busy():
+		_finish_round()
+		return
+	while is_inside_tree() and round_state==RoundState.ENDING:
+		var now:int=Time.get_ticks_usec()
+		if now-_finish_started_usec>=int(FINISH_WATCHDOG_SECONDS*1000000):
+			push_warning("Round-end presentation timed out; restoring result/camera safely.")
+			_finish_round()
+			return
+		if _finishing_presentation_busy():
+			_finish_idle_usec=0
+		else:
+			if _finish_idle_usec==0:_finish_idle_usec=now
+			if now-_finish_idle_usec>=int(FINISH_SETTLE_SECONDS*1000000):
+				_finish_round()
+				return
+		# This clock continues during an ultimate's world pause and ignores slow motion.
+		await get_tree().create_timer(.05,true,false,true).timeout
 
 
 func _finish_round() -> void:
-	if round_state != RoundState.FIGHT:
+	if round_state not in [RoundState.FIGHT,RoundState.ENDING]:
 		return
 	round_state = RoundState.FINISHED
 	brain.enabled = false
@@ -132,8 +195,8 @@ func _finish_round() -> void:
 		actor.external_move_direction = Vector3.ZERO
 		actor.velocity = Vector3.ZERO
 	CombatTimeManager.reset_time()
-	var hp: float = player.health_component.current_health
-	var enemy_hp: float = opponent.health_component.current_health
+	var hp: float = _result_player_hp if _result_player_hp>=0 else player.health_component.current_health
+	var enemy_hp: float = _result_opponent_hp if _result_opponent_hp>=0 else opponent.health_component.current_health
 	center_label.text = "HÒA" if is_equal_approx(hp, enemy_hp) else ("BẠN THẮNG!" if hp > enemy_hp else "AI THẮNG")
 	center_label.text += "\nHết giờ · so HP còn lại" if time_remaining <= 0.0 else ("\nBạn đã bị hạ gục" if hp <= 0.0 else "\nAI đã bị hạ gục")
 	center_label.visible = true
@@ -183,6 +246,7 @@ func replay() -> void:
 
 
 func _prepare_scene_exit() -> void:
+	round_state=RoundState.FINISHED
 	brain.enabled = false
 	for actor: PlayerController in [player, opponent]:
 		if actor.active_ability_action and actor.active_ability_action.is_active():

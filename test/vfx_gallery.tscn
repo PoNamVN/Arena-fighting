@@ -1,0 +1,7 @@
+[gd_scene load_steps=3 format=3]
+[ext_resource type="Script" path="res://test/vfx_gallery.gd" id="1"]
+[ext_resource type="PackedScene" path="res://test/knight_lookdev.tscn" id="2"]
+[node name="VFXGallery" type="Node3D"]
+script = ExtResource("1")
+[node name="Lookdev" parent="." instance=ExtResource("2")]
+preset_index = 2

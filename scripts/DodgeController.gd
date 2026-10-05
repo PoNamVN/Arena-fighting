@@ -99,10 +99,14 @@ func is_in_dodge_iframe() -> bool:
 	return is_in_iframe()
 
 
-func get_dodge_velocity() -> Vector3:
+func get_dodge_velocity(physics_delta: float = 0.0) -> Vector3:
 	if not is_dodging or dodge_duration <= 0.0:
 		return Vector3.ZERO
-	return world_direction * (dodge_distance / dodge_duration)
+	# Clamp the last physics step for durations that do not divide evenly into a tick.
+	var step_fraction := 1.0
+	if physics_delta > 0.0:
+		step_fraction = clampf((dodge_duration - _timer) / physics_delta, 0.0, 1.0)
+	return world_direction * (dodge_distance / dodge_duration) * step_fraction
 
 
 func determine_dodge_direction(input_dir: Vector2) -> Direction:

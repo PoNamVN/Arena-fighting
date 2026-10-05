@@ -183,10 +183,12 @@ func trigger_ultimate_feedback() -> void:
 		if _screen_tween and _screen_tween.is_valid():
 			_screen_tween.kill()
 		screen_emphasis.visible = true
-		screen_emphasis.color = Color(1.0, 0.85, 0.2, 1.0)
-		screen_emphasis.modulate.a = 0.45
-		_screen_tween = create_tween()
-		_screen_tween.tween_property(screen_emphasis, "modulate:a", 0.0, 0.40)\
+		var cinematic: Node = get_node_or_null("/root/UltimateCinematic")
+		var in_cutscene: bool = cinematic != null and cinematic.active
+		screen_emphasis.color = Color(1.0, 0.94, 0.85, 1.0) if in_cutscene else Color(1.0, 0.85, 0.2, 1.0)
+		screen_emphasis.modulate.a = 0.12 if in_cutscene else 0.45
+		_screen_tween = create_tween().set_pause_mode(Tween.TWEEN_PAUSE_PROCESS)
+		_screen_tween.tween_property(screen_emphasis, "modulate:a", 0.0, 0.16 if in_cutscene else 0.40)\
 			.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
 		_screen_tween.tween_callback(func() -> void:
 			if screen_emphasis:

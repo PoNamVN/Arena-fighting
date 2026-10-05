@@ -1,6 +1,6 @@
-[gd_scene load_steps=19 format=3]
+[gd_scene load_steps=20 format=3]
 [ext_resource type="Script" path="res://test/lookdev/knight_lookdev.gd" id="1"]
-[ext_resource type="PackedScene" path="res://assets/models/knight_k3.glb" id="2"]
+[ext_resource type="PackedScene" path="res://assets/models/knight_k3_style3.glb" id="2"]
 [ext_resource type="Resource" path="res://test/lookdev/day.tres" id="3"]
 [ext_resource type="Material" path="res://test/lookdev/materials/Skin.tres" id="L1_Skin"]
 [ext_resource type="Material" path="res://test/lookdev/materials/Tunic.tres" id="L1_Tunic"]
@@ -9,6 +9,8 @@
 [ext_resource type="Material" path="res://test/lookdev/materials/Steel.tres" id="L1_Steel"]
 [ext_resource type="Material" path="res://test/lookdev/materials/Crest.tres" id="L1_Crest"]
 [ext_resource type="Material" path="res://test/lookdev/materials/Gold.tres" id="L1_Gold"]
+[ext_resource type="Script" path="res://scripts/KnightClothMotion.gd" id="style3_cloth"]
+
 [sub_resource type="StandardMaterial3D" id="Sand"]
 albedo_color = Color(0.48, 0.43, 0.34, 1)
 roughness = 0.98
@@ -136,4 +138,10 @@ text = "KNIGHT / LOOK-DEV"
 [node name="Status" type="Label" parent="UI/Panel/Margin/VBox"]
 text = "Loading..."
 [node name="Preset" type="OptionButton" parent="UI/Panel/Margin/VBox"]
+
+
+[node name="KnightClothMotion" type="Node" parent="."]
+script = ExtResource("style3_cloth")
+model_path = NodePath("Knight")
+bind_on_ready = true
 

@@ -129,10 +129,10 @@ func _run() -> void:
 	_assert(player.combat.whirling_blade_vfx.visible, "Reusable circular VFX starts at ACTIVE")
 	var node_count: int = player.get_child_count()
 	var skeleton: Skeleton3D = player.visuals.find_child("Skeleton3D", true, false) as Skeleton3D
-	var root_bone: int = skeleton.find_bone("root")
+	var root_bone: int = skeleton.find_bone("hips")
 	var root_rotation: Quaternion = skeleton.get_bone_pose_rotation(root_bone)
 	await _step(8)
-	_assert(absf(root_rotation.dot(skeleton.get_bone_pose_rotation(root_bone))) < 0.95, "Authored root rotation produces a real spin")
+	_assert(absf(root_rotation.dot(skeleton.get_bone_pose_rotation(root_bone))) < 0.95, "Authored hips rotation produces a real spin with a stationary root")
 	_assert(player.global_position.distance_to(initial_position) < 0.02, "WASD cannot move player during C")
 	_assert(not player._try_combat_attack() and not player._start_block() and not player._try_dodge() and not player._try_cast_ability("skill_1"), "Combo/block/Q/Z cannot interrupt active C")
 	_assert(targets[0].current_hp == 70.0 and hits == 3, "ACTIVE does not spam per-frame damage")

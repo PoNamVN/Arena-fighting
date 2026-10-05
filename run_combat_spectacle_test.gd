@@ -104,11 +104,11 @@ func _run() -> void:
 	var sword_fx: GiantSwordVFX=player.combat.giant_sword_vfx
 	sword_fx.begin(Vector3(0,0,-5),4.5)
 	sword_fx.update_startup(0.35,1.2)
-	check(sword_fx._sigil.visible and sword_fx._fall_wake.visible, "Giant sword has rune and descending wake")
+	check(not sword_fx._sigil.visible and sword_fx.ring.visible and sword_fx._fall_wake.visible and sword_fx._fall_particles.emitting and sword_fx.sword.position.y > 0 and sword_fx.sword.position.y < GiantSwordVFX.DROP_HEIGHT, "Giant sword has ground telegraph and descending physical airflow without rune")
 	await capture("sword_fall",Vector3(16,20,18),Vector3(0,18,-5))
 	sword_fx.impact()
 	sword_fx.update_impact(0.18)
-	check(player.spectacle.triggered>0 and not sword_fx._fall_wake.visible, "Sword landing triggers pooled shock and removes wake")
+	check(sword_fx._burst.active_particles()>0 and sword_fx._burst.active_particles()+64+24<=600 and sword_fx.shockwave.visible and sword_fx._crater.visible and not sword_fx._fall_wake.visible and not sword_fx._fall_particles.emitting, "Sword landing triggers bounded pooled dust/pressure/crater and removes descent wake")
 	await frames(10)
 	await capture("sword_impact",Vector3(12,8,14),Vector3(0,1,-5))
 	sword_fx.stop()

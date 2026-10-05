@@ -1,6 +1,9 @@
 class_name PlayerCombat
 extends Node3D
 
+@export var show_basic_attack_telegraph: bool = true
+@export var show_basic_attack_trail: bool = true
+
 ## Signals
 signal hit_landed(target: Node, damage: float, was_blocked: bool)
 # Reserved exact impact-frame hook; no gameplay dispatch/timing changes in task 0.2.
@@ -189,6 +192,10 @@ func start_attack() -> bool:
 
 
 func trigger_attack_telegraph(direction: Vector3, windup: float = 0.35) -> void:
+	if not _basic_attack_visual_allowed(show_basic_attack_telegraph):
+		if attack_telegraph_vfx:
+			attack_telegraph_vfx.stop()
+		return
 	if attack_telegraph_vfx:
 		var origin: Vector3 = player.global_position if player else global_position
 		attack_telegraph_vfx.trigger(origin, direction, windup, player)
@@ -493,6 +500,12 @@ func is_attack_inside_block_cone(defender: Node3D, attacker_pos: Vector3, block_
 
 
 func _trigger_visual_cue(attack_direction: Vector3 = Vector3.FORWARD) -> void:
+	if not _basic_attack_visual_allowed(show_basic_attack_trail):
+		if slash_arc_vfx:
+			slash_arc_vfx.stop()
+		if visual_slash_cue:
+			visual_slash_cue.hide()
+		return
 	var direction: Vector3 = attack_direction
 	direction.y = 0.0
 
@@ -615,3 +628,8 @@ func _trigger_hit_stop() -> void:
 	# Safely skipped per design specification.
 	if player and player.anim_player:
 		player.anim_player.speed_scale = 1.0
+
+
+func _basic_attack_visual_allowed(enabled: bool) -> bool:
+	# Keep incoming NPC warnings and other heroes' presentation unchanged.
+	return enabled or not player or player.hero_profile != "knight" or player.external_controlled

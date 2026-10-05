@@ -72,17 +72,17 @@ func _run_all_tests() -> void:
 
 	# TEST 6: Actual dash distance is approximately 4.5m
 	var total_dist: float = p.global_position.distance_to(pos_start)
-	assert_true(total_dist >= 4.2 and total_dist <= 4.8, "TEST 6: Measured global_position displacement is ~4.5m (Actual: %.2fm)" % total_dist)
+	assert_true(absf(total_dist - 5.0) < 0.01, "TEST 6: Measured global_position displacement is ~5.0m (Actual: %.2fm)" % total_dist)
 
-	# TEST 7: Dash duration is ~0.25s
-	assert_true(p.dodge_controller.dodge_duration >= 0.24 and p.dodge_controller.dodge_duration <= 0.26, "TEST 7: Dash duration is ~0.25s (Config: %.2fs)" % p.dodge_controller.dodge_duration)
+	# TEST 7: Knight dash duration is 0.40s
+	assert_true(absf(p.dodge_controller.dodge_duration - 0.40) < 0.000001, "TEST 7: Knight dash duration is 0.40s (Config: %.2fs)" % p.dodge_controller.dodge_duration)
 
-	# TEST 7b: Dash speed is significantly faster than Sprint (18.0 m/s > 10.5 m/s)
+	# TEST 7b: Dash speed is significantly faster than Sprint (12.5 m/s > 10.5 m/s)
 	var dash_speed: float = p.dodge_controller.dodge_distance / p.dodge_controller.dodge_duration
 	assert_true(dash_speed > p.sprint_speed, "TEST 7b: Dash speed (%.1f m/s) is significantly faster than sprint speed (%.1f m/s)" % [dash_speed, p.sprint_speed])
 
-	# TEST 8: Cooldown activates to ~1.0s (0.25s elapsed during dash, ~0.75s remaining)
-	assert_true(p.dodge_controller._cooldown_timer > 0.70 and p.dodge_controller.cooldown == 1.0, "TEST 8: Cooldown is ~1.0s (Remaining: %.2fs, Config: %.1fs)" % [p.dodge_controller._cooldown_timer, p.dodge_controller.cooldown])
+	# TEST 8: Cooldown activates to ~1.0s (0.40s core, rounded to physics tick; ~0.67s remaining)
+	assert_true(absf(p.dodge_controller._cooldown_timer - (1.0 - p.dodge_controller._timer)) < 0.00001 and p.dodge_controller.cooldown == 1.0, "TEST 8: Cooldown is ~1.0s (Remaining: %.2fs, Config: %.1fs)" % [p.dodge_controller._cooldown_timer, p.dodge_controller.cooldown])
 
 	# TEST 9: Dash cannot be spammed during cooldown
 	var pos_cooldown_start: Vector3 = p.global_position
@@ -185,7 +185,7 @@ func _run_all_tests() -> void:
 	var disp_q: Vector3 = p.global_position - pos_q_start
 	assert_true(disp_q.z < -4.0 and absf(disp_q.x) < 0.3, "TEST 15: Q alone produces camera forward displacement (-Z: %.2fm)" % disp_q.z)
 
-	# TEST 15b: W + Shift + Q (Sprint + Q) overrides sprint speed and dashes ~4.5m forward
+	# TEST 15b: W + Shift + Q (Sprint + Q) overrides sprint speed and dashes ~5.0m forward
 	Input.action_press("move_forward")
 	Input.action_press("sprint")
 	await p.get_tree().physics_frame
@@ -215,7 +215,10 @@ func _run_all_tests() -> void:
 	assert_true(attack_cancelled and p.combat_state == PlayerController.CombatState.DODGE, "TEST 16b: Attack + Q cancels attack into DODGE")
 
 	# Wait for dodge to complete; verify no damage to dummy
-	await create_timer(0.35).timeout
+	safety = 100
+	while p.dodge_controller.is_dodging and safety > 0:
+		await p.get_tree().physics_frame
+		safety -= 1
 	var hp_remained: bool = (dummy_health == null or dummy_health.current_health == dummy_health.max_health)
 	assert_true(hp_remained, "TEST 17: Attack cancelled cleanly; zero damage dealt to target")
 	assert_true(p.combo_step == 0, "TEST 18: Combo step reset to 0 after attack cancel")
@@ -226,7 +229,10 @@ func _run_all_tests() -> void:
 	assert_true(p.combat_state == PlayerController.CombatState.BLOCK, "TEST 19a: In BLOCK state")
 	var block_cancelled: bool = p._try_dodge()
 	assert_true(block_cancelled and p.combat_state == PlayerController.CombatState.DODGE, "TEST 19b: Block + Q cancels BLOCK into DODGE")
-	await create_timer(0.35).timeout
+	safety = 100
+	while p.dodge_controller.is_dodging and safety > 0:
+		await p.get_tree().physics_frame
+		safety -= 1
 
 	# TEST 20: Finisher recovery + Q is rejected
 	p._combo_finisher_recovery_timer = 0.8

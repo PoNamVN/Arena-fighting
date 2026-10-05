@@ -210,7 +210,11 @@ func _run() -> void:
 	player._release_block()
 	await _step(15)
 	_assert(player._try_dodge(), "Q works after X")
-	await _step(20)
+	# Wait for the selected dash core, rather than assuming the old 20 ticks.
+	for frame: int in range(60):
+		if not player.dodge_controller.is_dodging:
+			break
+		await _step()
 	_assert(player._try_cast_ability("skill_1"), "Z remains usable after X")
 	if player.active_ability_action:
 		player.active_ability_action.cancel()

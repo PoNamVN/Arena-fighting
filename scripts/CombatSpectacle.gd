@@ -110,15 +110,18 @@ func _process(delta: float) -> void:
 	var drawing: bool = bow and (bow.charging or bow.volley_active or bow.seeking_active)
 	var target_lean: float = 0.10 if drawing else -0.12 * (_recoil / 0.22)
 	var knight_casting: bool = actor.hero_profile == "knight" and actor.active_ability_action != null and actor.active_ability_action.is_active()
+	var x_pose_owned: bool = knight_casting and actor.active_ability_action.data.id == "sky_dive"
 	if knight_casting:
 		var id: String = actor.active_ability_action.data.id
 		if id == "shield_charge":
 			target_lean = -0.24 if actor.active_ability_action.current_phase == AbilityAction.Phase.ACTIVE else -0.10
-		elif id == "sky_dive":
-			target_lean = -0.16 if actor.active_ability_action.current_phase == AbilityAction.Phase.ACTIVE else 0.08
 	if bow or actor.hero_profile == "knight":
-		_lean = lerpf(_lean, target_lean, 1 - exp(-12 * delta))
-		_model.transform = _model_rest * Transform3D(Basis(Vector3.RIGHT, _lean), Vector3.ZERO)
+		if x_pose_owned:
+			# X owns aim-dependent flight posture; bursts still update normally.
+			_lean = 0.0
+		else:
+			_lean = lerpf(_lean, target_lean, 1 - exp(-12 * delta))
+			_model.transform = _model_rest * Transform3D(Basis(Vector3.RIGHT, _lean), Vector3.ZERO)
 		if bow:
 			bow._bow.transform = Transform3D(Basis(Vector3.RIGHT, _lean), Vector3.ZERO) * bow._bow.transform
 		busy = busy or drawing or knight_casting or absf(_lean) > 0.001 or _recoil > 0

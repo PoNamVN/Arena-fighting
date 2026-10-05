@@ -1,8 +1,8 @@
-[gd_scene load_steps=16 format=3 uid="uid://c5q0q5i3r8d1x"]
+[gd_scene load_steps=18 format=3 uid="uid://c5q0q5i3r8d1x"]
 
 [ext_resource type="Script" path="res://scripts/PlayerController.gd" id="1_controller"]
 [ext_resource type="Script" path="res://scripts/PlayerCombat.gd" id="2_combat"]
-[ext_resource type="PackedScene" path="res://assets/models/knight_k3.glb" id="3_character"]
+[ext_resource type="PackedScene" path="res://assets/models/knight_k3_style3.glb" id="3_character"]
 [ext_resource type="Script" path="res://scripts/HealthComponent.gd" id="4_health"]
 
 [ext_resource type="PackedScene" uid="uid://c3u0yq6w5a2k1" path="res://scenes/SlashArcVFX.tscn" id="5_slash_arc"]
@@ -23,6 +23,9 @@
 
 [ext_resource type="Script" path="res://scripts/GiantSwordUltimate.gd" id="18_ultimate"]
 
+[ext_resource type="Script" path="res://scripts/KnightDashPresentation.gd" id="19_dash_visual"]
+[ext_resource type="Script" path="res://scripts/KnightDashCamera.gd" id="20_dash_camera"]
+
 [ext_resource type="Material" path="res://test/lookdev/materials/Skin.tres" id="L1_Skin"]
 [ext_resource type="Material" path="res://test/lookdev/materials/Tunic.tres" id="L1_Tunic"]
 [ext_resource type="Material" path="res://test/lookdev/materials/Leather.tres" id="L1_Leather"]
@@ -30,6 +33,8 @@
 [ext_resource type="Material" path="res://test/lookdev/materials/Steel.tres" id="L1_Steel"]
 [ext_resource type="Material" path="res://test/lookdev/materials/Crest.tres" id="L1_Crest"]
 [ext_resource type="Material" path="res://test/lookdev/materials/Gold.tres" id="L1_Gold"]
+
+[ext_resource type="Script" path="res://scripts/KnightClothMotion.gd" id="style3_cloth"]
 
 [sub_resource type="CapsuleShape3D" id="CapsuleShape3D_body"]
 radius = 0.4
@@ -56,6 +61,7 @@ shape = SubResource("CapsuleShape3D_body")
 [node name="CharacterModel" parent="Visuals" instance=ExtResource("3_character")]
 
 
+
 [node name="Gladiator_Mesh" parent="Visuals/CharacterModel/Gladiator_Armature/Skeleton3D"]
 surface_material_override/0 = ExtResource("L1_Skin")
 surface_material_override/1 = ExtResource("L1_Tunic")
@@ -64,13 +70,11 @@ surface_material_override/3 = ExtResource("L1_Steel")
 surface_material_override/4 = ExtResource("L1_Crest")
 surface_material_override/5 = ExtResource("L1_Gold")
 
-
 [node name="Gladiator_Shield" parent="Visuals/CharacterModel/Gladiator_Armature/Skeleton3D"]
 surface_material_override/0 = ExtResource("L1_Leather")
 surface_material_override/1 = ExtResource("L1_Bronze")
 surface_material_override/2 = ExtResource("L1_Steel")
 surface_material_override/3 = ExtResource("L1_Gold")
-
 
 [node name="Gladiator_Sword" parent="Visuals/CharacterModel/Gladiator_Armature/Skeleton3D"]
 surface_material_override/0 = ExtResource("L1_Leather")
@@ -78,19 +82,19 @@ surface_material_override/1 = ExtResource("L1_Steel")
 surface_material_override/2 = ExtResource("L1_Gold")
 
 [node name="SwordAttachment" type="BoneAttachment3D" parent="Visuals/CharacterModel/Gladiator_Armature/Skeleton3D"]
-bone_name = "hand.R"
+bone_name = "hand.L"
 
 [node name="Socket_SwordBase" type="Marker3D" parent="Visuals/CharacterModel/Gladiator_Armature/Skeleton3D/SwordAttachment"]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 1.07702508e-09, 0.07000005117, 0.07499998792)
 
 [node name="Socket_SwordTip" type="Marker3D" parent="Visuals/CharacterModel/Gladiator_Armature/Skeleton3D/SwordAttachment"]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -4.503979467e-08, 0.07000004338, 0.5299999563)
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -6.45853691084e-08, 0.0700000394452, 0.759999975403)
 
 [node name="ShieldAttachment" type="BoneAttachment3D" parent="Visuals/CharacterModel/Gladiator_Armature/Skeleton3D"]
-bone_name = "forearm.L"
+bone_name = "forearm.R"
 
 [node name="Socket_ShieldCenter" type="Marker3D" parent="Visuals/CharacterModel/Gladiator_Armature/Skeleton3D/ShieldAttachment"]
-transform = Transform3D(-8.498074422e-08, -1.711428027e-08, 1, 1.161486164e-15, -1, -1.711428027e-08, 1, -2.928981102e-16, 8.498074422e-08, 0.2910000086, 0.1399999559, 7.44398452e-09)
+transform = Transform3D(-8.498074422e-08, 1.711428027e-08, -1, -1.161486164e-15, -1, -1.711428027e-08, -1, -2.928981102e-16, -8.498074422e-08, -0.2910000086, 0.1399999559, 7.44398452e-09)
 [node name="CameraPivot" type="Node3D" parent="."]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.62, 0)
 
@@ -106,6 +110,8 @@ fov = 75.0
 
 [node name="PlayerCombat" type="Node3D" parent="."]
 script = ExtResource("2_combat")
+show_basic_attack_telegraph = false
+show_basic_attack_trail = false
 
 [node name="WhirlingBladeVFX" type="Node3D" parent="PlayerCombat"]
 script = ExtResource("16_whirling")
@@ -164,3 +170,12 @@ script = ExtResource("17_giant_sword")
 
 [node name="GiantSwordUltimate" type="Node" parent="."]
 script = ExtResource("18_ultimate")
+
+[node name="KnightDashPresentation" type="Node" parent="."]
+script = ExtResource("19_dash_visual")
+
+[node name="KnightDashCamera" type="Node" parent="KnightDashPresentation"]
+script = ExtResource("20_dash_camera")
+
+[node name="KnightClothMotion" type="Node" parent="."]
+script = ExtResource("style3_cloth")

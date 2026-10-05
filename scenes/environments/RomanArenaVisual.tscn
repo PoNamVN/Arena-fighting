@@ -1,0 +1,42 @@
+[gd_scene load_steps=10 format=3]
+
+[ext_resource type="Script" path="res://scripts/RomanArenaAmbience.gd" id="1_fkh2c"]
+[ext_resource type="ArrayMesh" path="res://assets/environment/roman/stone.res" id="2_8ryjc"]
+[ext_resource type="ArrayMesh" path="res://assets/environment/roman/trim.res" id="3_sio04"]
+[ext_resource type="ArrayMesh" path="res://assets/environment/roman/dark.res" id="4_fichs"]
+[ext_resource type="ArrayMesh" path="res://assets/environment/roman/brick.res" id="5_k6v4w"]
+[ext_resource type="ArrayMesh" path="res://assets/environment/roman/bronze.res" id="6_r2kj4"]
+[ext_resource type="ArrayMesh" path="res://assets/environment/roman/crowd.res" id="7_rep1j"]
+[ext_resource type="ArrayMesh" path="res://assets/environment/roman/banners.res" id="8_6gy61"]
+[ext_resource type="ArrayMesh" path="res://assets/environment/roman/sand.res" id="9_t0txp"]
+
+[node name="RomanArenaVisual" type="Node3D"]
+script = ExtResource("1_fkh2c")
+metadata/arena_theme = "roman_colosseum"
+
+[node name="RomanStone" type="MeshInstance3D" parent="."]
+mesh = ExtResource("2_8ryjc")
+
+[node name="RomanTrim" type="MeshInstance3D" parent="."]
+mesh = ExtResource("3_sio04")
+
+[node name="RomanDark" type="MeshInstance3D" parent="."]
+mesh = ExtResource("4_fichs")
+
+[node name="RomanBrick" type="MeshInstance3D" parent="."]
+mesh = ExtResource("5_k6v4w")
+
+[node name="RomanBronze" type="MeshInstance3D" parent="."]
+mesh = ExtResource("6_r2kj4")
+
+[node name="RomanCrowd" type="MeshInstance3D" parent="."]
+cast_shadow = 0
+mesh = ExtResource("7_rep1j")
+
+[node name="RomanBanners" type="MeshInstance3D" parent="."]
+cast_shadow = 0
+mesh = ExtResource("8_6gy61")
+
+[node name="RomanSand" type="MeshInstance3D" parent="."]
+cast_shadow = 0
+mesh = ExtResource("9_t0txp")

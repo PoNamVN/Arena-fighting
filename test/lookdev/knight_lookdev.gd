@@ -27,6 +27,7 @@ func _ready() -> void:
    _originals[id] = m.mesh.surface_get_material(s)
    _overrides[id] = m.get_surface_override_material(s)
  var ap: AnimationPlayer = model.get_node("AnimationPlayer")
+ preload("res://scripts/KnightHandedness.gd").apply(model,ap)
  ap.play("idle")
  ap.seek(0.25, true)
  ap.pause()

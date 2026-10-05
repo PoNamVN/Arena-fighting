@@ -226,7 +226,7 @@ func _run_test_suite() -> void:
 	var block_lmb_pass: bool = (p.combat_state == PlayerController.CombatState.ATTACK)
 	block_lmb_pass = block_lmb_pass and p.is_attacking and (not p.is_blocking)
 	block_lmb_pass = block_lmb_pass and (p._block_transition == "")
-	block_lmb_pass = block_lmb_pass and (p.anim_player.current_animation == "attack")
+	block_lmb_pass = block_lmb_pass and (p.anim_player.current_animation == "attack_1")
 	_record_result("STEP 10: BLOCK + LMB -> ATTACK", block_lmb_pass, "Block cleanly dropped, transitioned to ATTACK with _block_transition == ''")
 
 	# Wait for attack swing to complete
@@ -390,4 +390,3 @@ func _run_test_suite() -> void:
 	print("====================================================")
 	
 	quit(0 if pass_count == _test_results.size() else 1)
-

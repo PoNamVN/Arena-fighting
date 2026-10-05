@@ -2,6 +2,8 @@ extends Node
 
 const Definition = preload("res://scripts/vfx/VFXDefinition.gd")
 const PooledEffect = preload("res://scripts/vfx/PooledVFX.gd")
+const COMMON_LIBRARY = preload("res://vfx/common/library.tres")
+const COMMON_MULTIPLIERS: Array[float] = [0.5, 1.0, 1.2]
 const DEFAULT_LIBRARY = preload("res://vfx/vfx_library.tres")
 enum Quality { LOW, MEDIUM, HIGH }
 const MULTIPLIERS: Array[float] = [0.5, 0.75, 1.0]
@@ -28,6 +30,15 @@ var _bindings: Dictionary = {}
 var _active: Dictionary = {}
 var _observed: Dictionary = {}
 var _warming: bool = false
+var _common_defaults: Dictionary = {}
+var _visual_stop: Node
+var hit_stop_enabled := false:
+	set(value):
+		hit_stop_enabled = value
+		if is_instance_valid(_visual_stop):
+			_visual_stop.enabled = value
+			if not value:
+				_visual_stop.restore()
 var _pool_root: Node3D
 var _warm_viewport: SubViewport
 var _warm_root: Node3D
@@ -35,6 +46,9 @@ var _spawn_count: int = 0
 var _drop_count: int = 0
 
 func _ready() -> void:
+	_visual_stop = preload("res://vfx/common/visual_hit_stop.gd").new()
+	_visual_stop.name = "VisualHitStop"
+	add_child(_visual_stop)
 	_pool_root = Node3D.new()
 	_pool_root.name = "Pools"
 	_pool_root.process_mode = Node.PROCESS_MODE_PAUSABLE
@@ -42,6 +56,11 @@ func _ready() -> void:
 	get_tree().node_added.connect(_on_node_added)
 	for definition: Resource in DEFAULT_LIBRARY.definitions:
 		register_definition(definition)
+	for definition: Resource in COMMON_LIBRARY.definitions:
+		var authored := definition.duplicate()
+		if authored.effect_name == &"DustPuff":
+			authored.pool_size = 16
+		register_definition(authored)
 	call_deferred("warm_up")
 	_scan(get_tree().root)
 
@@ -59,8 +78,10 @@ func register_definition(definition: Definition) -> bool:
 		effect.name = "%s_%d" % [definition.effect_name,index]
 		_pool_root.add_child(effect)
 		effect.configure(clampf(definition.duration,0.02,30), 500 if definition.ultimate else 200)
-		effect.apply_quality(1.0 if definition.essential else MULTIPLIERS[quality])
+		effect.apply_quality(1.0 if definition.essential else _quality_for(definition))
 		effect.finished.connect(_on_effect_finished)
+		if _is_common(definition) and effect.particles:
+			_common_defaults[effect.get_instance_id()] = {"direction":effect.motion.direction,"spread":effect.motion.spread,"initial_velocity_min":effect.motion.initial_velocity_min,"initial_velocity_max":effect.motion.initial_velocity_max,"lifetime":effect.particles.lifetime}
 		instances.append(effect)
 	var available: Array[Node3D] = instances.duplicate()
 	_entries[definition.effect_name] = {"definition":definition,"instances":instances,"available":available,"warmed":false,"rendered":false}
@@ -79,7 +100,7 @@ func _contains_gameplay_node(node: Node) -> bool:
 			return true
 	return false
 
-func spawn(effect_name: StringName, at: Transform3D = Transform3D.IDENTITY, context: Dictionary = {}) -> Node3D:
+func spawn(effect_name: StringName, at: Variant = Transform3D.IDENTITY, context: Dictionary = {}) -> Node3D:
 	if not _entries.has(effect_name):
 		_reject(effect_name,&"unknown_name")
 		return null
@@ -92,12 +113,20 @@ func spawn(effect_name: StringName, at: Transform3D = Transform3D.IDENTITY, cont
 	if entry.available.is_empty():
 		_reject(effect_name,&"pool_full")
 		return null
+	if _is_common(entry.definition):
+		var requested: int = entry.available.back().requested_particles(_quality_for(entry.definition),context)
+		var limit: int = clampi(int(context.get("particle_limit",600 if context.get("ultimate",false) else 300)),1,600)
+		if common_particles() + requested > limit:
+			_reject(effect_name,&"particle_budget")
+			return null
 	var effect: Node3D = entry.available.pop_back()
-	effect.global_transform = at
-	effect.apply_quality(1.0 if entry.definition.essential else MULTIPLIERS[quality])
+	effect.global_transform = Transform3D(Basis.IDENTITY,at) if at is Vector3 else at
+	effect.apply_quality(1.0 if entry.definition.essential else _quality_for(entry.definition))
 	var owner_id: int = context.actor.get_instance_id() if context.get("actor") is Node else 0
 	_active[effect.get_instance_id()] = {"effect":effect,"name":effect_name,"owner_id":owner_id}
 	_spawn_count += 1
+	if _is_common(entry.definition):
+		_prepare_common(effect,entry.definition,context)
 	effect.play(context)
 	return effect
 
@@ -135,7 +164,7 @@ func set_quality(value: Quality) -> void:
 	_quality = clampi(value,Quality.LOW,Quality.HIGH) as Quality
 	for entry: Dictionary in _entries.values():
 		for effect: Node3D in entry.available:
-			effect.apply_quality(1.0 if entry.definition.essential else MULTIPLIERS[quality])
+			effect.apply_quality(1.0 if entry.definition.essential else _quality_for(entry.definition))
 	quality_changed.emit(quality)
 
 func warm_up() -> void:
@@ -161,7 +190,8 @@ func warm_up() -> void:
 			payload["warmup"] = true
 			effect.play(payload)
 			await RenderingServer.frame_post_draw
-			await get_tree().create_timer(entry.definition.warmup_seconds).timeout
+			if not _is_common(entry.definition):
+				await get_tree().create_timer(entry.definition.warmup_seconds).timeout
 			await RenderingServer.frame_post_draw
 			# Readback ensures this is an actual render, not just resource preloading.
 			var rendered_image: Image = _warm_viewport.get_texture().get_image()
@@ -171,7 +201,7 @@ func warm_up() -> void:
 			effect.reparent(_pool_root,false)
 			effect.transform = Transform3D.IDENTITY
 			effect.configure(clampf(entry.definition.duration,0.02,30),500 if entry.definition.ultimate else 200)
-			effect.apply_quality(1.0 if entry.definition.essential else MULTIPLIERS[quality])
+			effect.apply_quality(1.0 if entry.definition.essential else _quality_for(entry.definition))
 			entry.available.append(effect)
 		entry.warmed = true
 	if is_instance_valid(_warm_viewport):
@@ -197,6 +227,12 @@ func _create_warmup_viewport() -> void:
 	add_child(_warm_viewport)
 	_warm_root = Node3D.new()
 	_warm_viewport.add_child(_warm_root)
+	var floor_mesh := MeshInstance3D.new()
+	floor_mesh.layers = 8
+	var plane := PlaneMesh.new()
+	plane.size = Vector2(8,8)
+	floor_mesh.mesh = plane
+	_warm_root.add_child(floor_mesh)
 	var camera: Camera3D = Camera3D.new()
 	_warm_root.add_child(camera)
 	camera.position = Vector3(0,1.1,3)
@@ -318,3 +354,58 @@ func _actor_left(id: int) -> void:
 	for item: Dictionary in _active.values():
 		if item.owner_id == id:
 			release(item.effect)
+
+func _is_common(definition: Resource) -> bool:
+	return definition.scene.resource_path.begins_with("res://vfx/common/")
+
+func _quality_for(definition: Resource) -> float:
+	return COMMON_MULTIPLIERS[quality] if _is_common(definition) else MULTIPLIERS[quality]
+
+func common_particles() -> int:
+	var count := 0
+	for item: Dictionary in _active.values():
+		if _is_common(_entries[item.name].definition):
+			count += item.effect.effective_particles()
+	return count
+
+func warmup() -> void:
+	if _warming:
+		await warmup_finished
+	else:
+		await warm_up()
+
+# Existing actor recoil owns camera motion; no parallel shake system.
+func camera_recoil(actor: Node, type: int = 0) -> void:
+	if is_instance_valid(actor) and actor.has_method("apply_camera_recoil"):
+		actor.apply_camera_recoil(clampi(type,0,2))
+
+func hit_stop(visual: AnimationPlayer, seconds: float = 0.06) -> bool:
+	_visual_stop.enabled = hit_stop_enabled
+	return _visual_stop.hit_stop(visual,seconds)
+
+# Optional visual parameters for Z; defaults are restored on every lease.
+func _prepare_common(effect: Node3D, definition: Resource, params: Dictionary) -> void:
+	effect.configure(clampf(definition.duration,0.02,30),200)
+	if not effect.particles:
+		return
+	var defaults: Dictionary = _common_defaults[effect.get_instance_id()]
+	effect.motion.direction = params.get("direction",defaults.direction)
+	effect.motion.spread = params.get("spread",defaults.spread)
+	effect.motion.initial_velocity_min = params.get("speed_min",defaults.initial_velocity_min)
+	effect.motion.initial_velocity_max = params.get("speed_max",defaults.initial_velocity_max)
+	effect.particles.lifetime = clampf(params.get("particle_lifetime",defaults.lifetime),0.05,defaults.lifetime)
+	if params.has("particle_lifetime"):
+		effect.duration = effect.particles.lifetime+0.05
+
+func try_spawn(effect_name: StringName, at: Variant, params: Dictionary = {}) -> Node3D:
+	if not _entries.has(effect_name) or not enabled:
+		return null
+	var entry: Dictionary = _entries[effect_name]
+	if not entry.warmed or entry.available.is_empty():
+		return null
+	if _is_common(entry.definition):
+		var count: int = entry.available.back().requested_particles(_quality_for(entry.definition),params)
+		var limit:=clampi(int(params.get("particle_limit",600 if params.get("ultimate",false) else 300)),1,600)
+		if common_particles()+count > limit:
+			return null
+	return spawn(effect_name,at,params)

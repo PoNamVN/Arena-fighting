@@ -45,6 +45,8 @@ func _input(action: StringName, pressed: bool) -> void:
 func _reset_scenario() -> void:
 	for action: StringName in [&"attack", &"skill_1", &"skill_2", &"skill_3", &"ultimate"]:
 		_input(action, false)
+	# respawn() deliberately ignores living actors. Each scenario needs a fresh life.
+	p.transition_to(PlayerController.CombatState.DEAD)
 	p.respawn(Vector3(0, 0.1, 0))
 	p._camera_yaw = 0
 	p._camera_pitch = 0

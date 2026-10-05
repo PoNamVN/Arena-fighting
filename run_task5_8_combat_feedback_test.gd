@@ -68,6 +68,9 @@ func _run_tests() -> void:
 	var ad: Node3D = _attack_dummy
 	var td: TrainingDummy = _training_dummy
 	var combat: PlayerCombat = p.combat
+	# Opt in here to retain coverage of the optional legacy VFX geometry.
+	combat.show_basic_attack_trail = true
+	combat.show_basic_attack_telegraph = true
 	var dummy_health: HealthComponent = td.get_node("HealthComponent") as HealthComponent
 
 	# Ensure automatic attacking on attack dummy is disabled initially

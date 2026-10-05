@@ -87,7 +87,7 @@ func _cast(confirm: bool = true, point: Vector3 = Vector3.ZERO) -> void:
 
 
 func _wait_active() -> bool:
-	for frame: int in range(120):
+	for frame: int in range(180):
 		if player.active_ability_action and player.active_ability_action.current_phase == AbilityAction.Phase.ACTIVE:
 			return true
 		await _step()
@@ -166,7 +166,7 @@ func _run() -> void:
 	var sword_height: float = player.combat.giant_sword_vfx.sword.position.y
 	var child_count: int = player.combat.giant_sword_vfx.get_child_count()
 	_input("move_forward", true)
-	await _step(25)
+	await _step(60)
 	_assert(player.combat.giant_sword_vfx.sword.position.y < sword_height and player.combat.giant_sword_vfx.sword.position.y > 0, "Sword descends during startup")
 	_assert(hits == 0 and feedbacks == 0 and targets[0].current_hp == 100, "No early damage or ultimate impact audio")
 	_assert(player.global_position.distance_to(origin) < 0.02, "WASD is locked while casting")
@@ -223,7 +223,7 @@ func _run() -> void:
 	player._knockback_timer = 0.1
 	player._knockback_vel = Vector3(0, 0, 4)
 	await _step(20)
-	_assert(player.global_position.distance_to(origin) > 0.1 and player.combat.giant_sword_vfx.global_position.distance_to(origin) < 0.02, "Incoming knockback preserves selected telegraph position")
+	_assert(player.global_position.distance_to(origin) < 0.02 and player.combat.giant_sword_vfx.global_position.distance_to(origin) < 0.02 and paused, "Cinematic freezes caster knockback and preserves selected telegraph position")
 	if not await _wait_active():
 		quit(1)
 		return
@@ -238,9 +238,12 @@ func _run() -> void:
 	await _step(4)
 	receiver.set_physics_process(false)
 	receiver.stamina_component.current_stamina = 0
-	await _cast()
-	await _step(73)
-	_assert(receiver.dodge_controller.start_dodge(), "Receiver dodges near V impact")
+	await _cast(false)
+	await _step(30)
+	_assert(receiver.dodge_controller.start_dodge(), "Receiver starts dodge before committed world freeze")
+	await _step(5)
+	_assert(receiver.is_in_dodge_iframe(), "Pre-existing i-frame is active when target is confirmed")
+	await _click_point(Vector3.ZERO)
 	if not await _wait_active():
 		quit(1)
 		return

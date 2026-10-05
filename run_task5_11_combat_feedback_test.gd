@@ -56,6 +56,9 @@ func _run_tests() -> void:
 	var ad: AttackTrainingDummy = arena.attack_dummy
 	var td: TrainingDummy = arena.training_dummy
 	var combat: PlayerCombat = p.combat
+	# Opt in here to retain coverage of the optional legacy VFX geometry.
+	combat.show_basic_attack_trail = true
+	combat.show_basic_attack_telegraph = true
 
 	# Ensure attack dummy doesn't auto-swing during test setup
 	ad.set("auto_attack", false)

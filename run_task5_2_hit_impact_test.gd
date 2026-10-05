@@ -42,6 +42,9 @@ func _run_test_suite() -> void:
 	for i in range(10): await process_frame
 	
 	var combat: PlayerCombat = p.combat
+	# Opt in here to retain coverage of the optional legacy VFX geometry.
+	combat.show_basic_attack_trail = true
+	combat.show_basic_attack_telegraph = true
 	var hit_vfx: Node3D = combat.hit_impact_vfx
 	var slash_vfx: Node3D = combat.slash_arc_vfx
 	

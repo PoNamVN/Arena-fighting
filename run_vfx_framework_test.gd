@@ -40,7 +40,8 @@ func run() -> void:
 	manager = root.get_node("VFXManager")
 	if not manager.warmup_complete:
 		await manager.warmup_finished
-	check(manager.stats().pooled==8 and manager.stats().available==8, "Autoload preallocates eight named probe scenes")
+	var baseline_pooled: int = manager.stats().pooled
+	check(manager._entries[&"framework_probe"].instances.size()==8 and manager.stats().available==baseline_pooled, "Autoload preallocates eight named probe scenes")
 	check(manager.stats().active==0 and manager.get_node_or_null("WarmupViewport")==null, "Warm-up leaves no active effect or viewport")
 	check(manager.warmup_rendered == (DisplayServer.get_name()!="headless"), "Headless skip is reported honestly; renderer performs real warm-up")
 	if DisplayServer.get_name()!="headless":
@@ -54,7 +55,7 @@ func run() -> void:
 		if is_instance_valid(fx):
 			ids[fx.get_instance_id()] = true
 			manager.release(fx)
-	check(ids.size()<=8 and manager.stats().active==0 and manager.stats().available==8, "100 spawn/release cycles reuse the fixed pool")
+	check(ids.size()<=8 and manager.stats().active==0 and manager.stats().available==baseline_pooled, "100 spawn/release cycles reuse the fixed pool")
 	check(manager.get_node("Pools").get_child_count()==initial_children, "100 cycles do not grow pooled node count")
 	await frames(2)
 	check(int(Performance.get_monitor(Performance.OBJECT_NODE_COUNT))==initial_nodes, "No residual scene nodes after 100 cycles")
@@ -62,10 +63,10 @@ func run() -> void:
 	for i in range(100):
 		if manager.spawn(&"framework_probe"):
 			accepted += 1
-	check(accepted==8 and manager.stats().active==8 and manager.stats().pooled==8, "100 simultaneous requests cap at eight instances")
+	check(accepted==8 and manager.stats().active==8 and manager.stats().pooled==baseline_pooled, "100 simultaneous requests cap at eight instances")
 	check(manager.stats().particle_budget==128, "High stress is bounded at 128 GPU particles")
 	await frames(32)
-	check(manager.stats().active==0 and manager.stats().available==8, "Duration expiry automatically returns every instance")
+	check(manager.stats().active==0 and manager.stats().available==baseline_pooled, "Duration expiry automatically returns every instance")
 	check(not manager.spawn(&"missing"), "Unknown name is safely rejected")
 	var high: Node3D = manager.spawn(&"framework_probe")
 	check(high.effective_particles()==16 and high.get_node("Sparks").amount==16, "High uses authored amount with fixed GPU allocation")
@@ -210,6 +211,6 @@ func run() -> void:
 	check(manager.stats().active==0 and manager.stats().observed==0, "Actor/scene exit clears owned leases and observer records")
 	manager.set_quality(manager.Quality.MEDIUM)
 	for effect: Node3D in manager.get_node("Pools").get_children():
-		check(not effect.active and not effect.is_processing() and not effect.get_node("Sparks").emitting, "Idle pooled scene is hidden, stopped and not emitting")
+		check(not effect.active and not effect.is_processing() and effect._emitters.all(func(item: Dictionary): return not item.node.emitting), "Idle pooled scene is hidden, stopped and not emitting")
 	print("RESULTS: %d/%d PASSED" % [passed,passed+failed])
 	quit(0 if failed==0 else 1)

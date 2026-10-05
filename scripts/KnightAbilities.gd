@@ -14,15 +14,15 @@ static func create_shield_charge() -> AbilityData:
 	a.range = 2.5
 	a.is_aoe = false
 	a.is_dodgeable = true
-	a.startup_duration = 0.20
-	a.active_duration = 0.60
+	a.startup_duration = 0.32
+	a.active_duration = 0.95
 	a.recovery_duration = 0.40
 	a.allows_movement = true
-	a.movement_speed = 12.0
+	a.movement_speed = 14.8
 	a.has_front_protection = true
 	a.allows_dodge = false
-	a.knockback_distance = 0.60
-	a.knockback_duration = 0.20
+	a.knockback_distance = 2.40
+	a.knockback_duration = 0.30
 	return a
 
 

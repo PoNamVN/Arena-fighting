@@ -1,12 +1,22 @@
-[gd_scene load_steps=7 format=3]
+[gd_scene load_steps=12 format=3]
 
 [ext_resource type="PackedScene" uid="uid://cquuhqpgfxgn3" path="res://assets/models/arena.glb" id="1_model"]
 
+[ext_resource type="PackedScene" path="res://scenes/ArenaSkyClouds.tscn" id="8_sky_clouds"]
+
+[ext_resource type="PackedScene" path="res://scenes/environments/RomanArenaVisual.tscn" id="9_roman_visual"]
+
+[ext_resource type="PackedScene" path="res://scenes/environments/GreekArenaRuins.tscn" id="10_greek_ruins"]
+
+[ext_resource type="PackedScene" path="res://scenes/environments/DesertDust.tscn" id="11_desert_dust"]
+
+[ext_resource type="Script" path="res://scripts/ArenaPlayBounds.gd" id="12_play_bounds"]
+
 [sub_resource type="ProceduralSkyMaterial" id="ProceduralSkyMaterial_arena"]
-sky_top_color = Color(0.38, 0.52, 0.72, 1)
+sky_top_color = Color(0.29, 0.47, 0.68, 1)
 sky_horizon_color = Color(0.68, 0.72, 0.76, 1)
-ground_bottom_color = Color(0.2, 0.22, 0.25, 1)
-ground_horizon_color = Color(0.68, 0.72, 0.76, 1)
+ground_bottom_color = Color(0.58, 0.49, 0.36, 1)
+ground_horizon_color = Color(0.74, 0.70, 0.60, 1)
 
 [sub_resource type="Sky" id="Sky_arena"]
 sky_material = SubResource("ProceduralSkyMaterial_arena")
@@ -14,8 +24,17 @@ sky_material = SubResource("ProceduralSkyMaterial_arena")
 [sub_resource type="Environment" id="Environment_arena"]
 background_mode = 2
 sky = SubResource("Sky_arena")
-tonemap_mode = 2
+ambient_light_source = 3
+ambient_light_color = Color(0.85, 0.82, 0.75, 1)
+ambient_light_energy = 0.48
+tonemap_mode = 3
+tonemap_white = 4.0
 glow_enabled = true
+fog_enabled = true
+fog_light_color = Color(0.78, 0.72, 0.60, 1)
+fog_light_energy = 0.5
+fog_density = 0.0008
+fog_sky_affect = 0.0
 
 [sub_resource type="BoxShape3D" id="BoxShape3D_floor"]
 size = Vector3(50, 1, 50)
@@ -30,9 +49,13 @@ environment = SubResource("Environment_arena")
 
 [node name="DirectionalLight3D" type="DirectionalLight3D" parent="."]
 transform = Transform3D(0.866025, -0.353553, 0.353553, 0, 0.707107, 0.707107, -0.5, -0.612372, 0.612372, 0, 20, 0)
+light_color = Color(1, 0.91, 0.79, 1)
+light_energy = 1.05
 shadow_enabled = true
+directional_shadow_max_distance = 90.0
 
 [node name="ArenaVisualModel" parent="." instance=ExtResource("1_model")]
+visible = false
 
 [node name="FloorCollision" type="StaticBody3D" parent="."]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -0.5, 0)
@@ -78,3 +101,14 @@ shape = SubResource("BoxShape3D_wall")
 transform = Transform3D(-0.9239, 0, 0.3827, 0, 1, 0, -0.3827, 0, -0.9239, 8.4853, 2.5, -20.4853)
 shape = SubResource("BoxShape3D_wall")
 
+
+[node name="SkyClouds" parent="." instance=ExtResource("8_sky_clouds")]
+
+[node name="RomanArenaVisual" parent="." instance=ExtResource("9_roman_visual")]
+
+[node name="GreekArenaRuins" parent="." instance=ExtResource("10_greek_ruins")]
+
+[node name="DesertDust" parent="." instance=ExtResource("11_desert_dust")]
+
+[node name="ArenaPlayBounds" type="Node3D" parent="."]
+script = ExtResource("12_play_bounds")

@@ -1,4 +1,4 @@
-[gd_resource type="Resource" load_steps=5 format=3]
+[gd_resource type="Resource" load_steps=5 format=3 uid="uid://chyyygpeynjiw"]
 
 [ext_resource type="Script" path="res://scripts/vfx/VFXLibrary.gd" id="1"]
 [ext_resource type="Script" path="res://scripts/vfx/VFXDefinition.gd" id="2"]
@@ -10,6 +10,13 @@ effect_name = &"framework_probe"
 scene = ExtResource("3")
 pool_size = 8
 duration = 0.4
+ultimate = false
+essential = false
+event = &""
+hero = &""
+skill = &""
+warmup_context = {}
+warmup_seconds = 0.12
 
 [resource]
 script = ExtResource("1")

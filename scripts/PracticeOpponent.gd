@@ -66,7 +66,7 @@ func _physics_process(delta: float) -> void:
 	if not enabled or actor.is_dead or target.is_dead or not actor.controls_enabled:
 		_cancel_warning()
 		return
-	if actor.frost and actor.frost.active():
+	if actor.is_control_impaired() and not (actor.polymorph and actor.polymorph.active()):
 		_cancel_warning()
 		return
 	if actor.polymorph and actor.polymorph.active():

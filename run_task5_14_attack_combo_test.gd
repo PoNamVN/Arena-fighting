@@ -64,6 +64,9 @@ func _run_tests() -> void:
 	var ad: AttackTrainingDummy = arena.attack_dummy
 	var td: TrainingDummy = arena.training_dummy
 	var combat: PlayerCombat = p.combat
+	# Explicit legacy presentation opt-in; default-off coverage is in the new combo suite.
+	combat.show_basic_attack_telegraph = true
+	combat.show_basic_attack_trail = true
 
 	# Ensure attack dummy doesn't auto-swing
 	ad.set("auto_attack", false)
