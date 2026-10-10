@@ -160,8 +160,8 @@ func _move_to(goal: Vector3) -> bool:
 	var hit := (actor as PhysicsBody3D).move_and_collide(goal - actor.global_position)
 	# Bounds run later too, but constrain now so the hawk/socket sees the same location.
 	var bounds := actor.get_parent().find_child("ArenaPlayBounds", true, false)
-	if bounds and actor is CharacterBody3D: bounds.constrain_actor(actor)
 	if _air_ragdoll: actor.ragdoll.move_hawk_grip(actor.global_position - before)
+	if bounds and actor is CharacterBody3D: bounds.constrain_actor(actor)
 	return hit == null and actor.global_position.distance_to(goal) < .12
 
 func _start_fall() -> void:

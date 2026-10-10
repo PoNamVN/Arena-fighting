@@ -1,4 +1,17 @@
 # Archer Z đã ghép vào dự án chính
+## Boundary fix — 2026-10-10
+
+The perimeter colliders are only 5 m high while Z carries a victim to 14 m. ArenaPlayBounds previously used idle `process_priority` rather than Godot 4.3 `process_physics_priority`, and constrained only the character proxy. Reproduction measured a proxy more than 1 m outside and ragdoll bones up to 9.3 m outside; the old edge test missed the physical body.
+
+Bounds now run after character movement/recovery and constrain every simulated ragdoll bone at all altitudes, removing outward velocity. Carry transports the ragdoll before applying bounds and keeps the ankle pins synchronized. A carry that hits the perimeter ends its circle into the fall; physical bounds remain active through landing and get-up. This also protects ordinary ragdoll knockdowns at the arena edge.
+
+`run_archer_hawk_bounds_test.gd` checks all eight perimeter planes throughout capture, carry, fall and recovery: Knight, Archer and Wizard each passed 32/32 in separate headless processes (96/96 total, exit 0). Select a profile with `--headless --fixed-fps 60 --script run_archer_hawk_bounds_test.gd -- archer` or `-- wizard`; default is Knight. The fixture injects the real hit/capture path so map pillars do not obstruct projectile acquisition. The test is included in `tools/run_regression.ps1`.
+
+Other headless regressions: Z 27/27, edge 16/16, throw/get-up 66/66, Knight ragdoll 13/13, Knight recovery/bounds 13/13, round finish 35/35; all exit 0, no script/parse errors. Existing headless dummy mesh cleanup errors remain. A combined 24-capture run stalled when switching rigs; the three profile checks above ran separately, so this does not verify sustained mixed-rig stress. Manual camera/animation feel near the wall still needs play testing.
+
+Forward Plus: one full capture/carry/fall/get-up at the previously failing wall passed 4/4, exit 0, stderr empty. The eight-wall renderer attempt exceeded its 45-second budget after three completed cases; it is not counted as a full renderer pass.
+
+Godot priority reference: https://docs.godotengine.org/en/4.3/classes/class_node.html#class-node-property-process-physics-priority
 
 ## Ragdoll từ lúc gắp cổ chân — revision 4
 
