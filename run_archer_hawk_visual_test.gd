@@ -10,7 +10,7 @@ func _run() -> void:
 	root.add_child(arena)
 	var bow := await fresh_volley()
 	var skill := bow.hawk_skill
-	for warm_frame in range(600):
+	for warm_frame in range(840):
 		if root.get_node("VFXManager").warmup_complete: break
 		await frames(1)
 	check(root.get_node("VFXManager").warmup_complete, "VFX pools warm up through the actual renderer")
@@ -22,7 +22,7 @@ func _run() -> void:
 	camera.make_current()
 	bow.start_hawk()
 	var seen: Dictionary = {}
-	for i in range(600):
+	for i in range(840):
 		await frames(1)
 		if skill.phase == ArcherHawkSkill.Phase.FLIGHT and not seen.has("fish"):
 			seen.fish = true
@@ -59,7 +59,7 @@ func _run() -> void:
 	player.ability_system.reset_cooldowns()
 	player.stamina_component.current_stamina = 100
 	bow.start_hawk()
-	await frames(600)
+	await frames(840)
 	check(skill.grabs == 2 and skill.landings == 2, "Disabling decorative VFX preserves gameplay")
 	check(not skill._effects.is_empty() or not skill.active(), "Essential warnings do not control capture timing")
 	root.get_node("VFXManager").enabled = true
@@ -87,7 +87,7 @@ func _run() -> void:
 	check(enemy.hawk_carry.inversion > .99 and enemy.camera.global_basis.y.y < -.8, "Victim and FPS camera are upside down while held by the ankles")
 	check(enemy.global_position.y > 13.5, "Hawk lifts the actual target fourteen metres")
 	await snapshot("victim_fps")
-	await frames(420)
+	await frames(660)
 	check(not enemy.hawk_carry.active() and enemy.camera_pivot.position.y == enemy.hawk_carry._camera_rest.y, "Victim camera offset restores after landing")
 	check(not enemy.hawk_carry._body_masked and enemy.camera.cull_mask == enemy.hawk_carry._camera_cull_rest and enemy.camera.rotation.is_equal_approx(enemy.hawk_carry._camera_rotation_rest), "Victim render layers and cull mask restore after landing")
 	check(skill.grabs == 3 and skill.landings == 3, "Low VFX quality preserves the complete third cast")

@@ -4,7 +4,7 @@ extends Node
 enum Phase { IDLE, MARKED, LIFT, CARRY, FALL, RECOVER }
 const HEIGHT := 14.0
 const LIFT_SECONDS := 1.1
-const CIRCLE_SECONDS := 2.2
+const CIRCLE_SECONDS := 8.0
 const INVERT_SECONDS := .45
 const RADIUS := 5.5
 const THROW_SPEED := 3.5
@@ -126,7 +126,7 @@ func step(delta: float) -> void:
 		return
 	elapsed += delta
 	total_elapsed += delta
-	if total_elapsed > 6.5:
+	if total_elapsed > LIFT_SECONDS + CIRCLE_SECONDS + 3.2:
 		clear()
 		return
 	match phase:

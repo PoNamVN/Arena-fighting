@@ -30,6 +30,9 @@ const BOW_SCENE: PackedScene = preload("res://assets/models/hunter_bow.glb")
 var bait_ultimate: ArcherBaitUltimate
 var actor: PlayerController
 var charging: bool = false
+var sky_aiming: bool = false
+var _sky_pitch_rest: float = 0.0
+var reticle_hud: ArcherReticleHUD
 var charge_time: float = 0.0
 var recovery_remaining: float = 0.0
 var locked_target: Node3D
@@ -244,8 +247,29 @@ func start_charge() -> bool:
 	end_stealth()
 	charging = true
 	charge_time = 0.0
-	locked_target = _find_target()
+	if _hawk_shooting_window():
+		_enter_sky_aim()
+	locked_target = null if sky_aiming else _find_target()
 	return true
+
+func _hawk_shooting_window() -> bool:
+	return is_instance_valid(hawk_skill.capture) and hawk_skill.capture.phase in [HawkCarryEffect.Phase.LIFT, HawkCarryEffect.Phase.CARRY]
+
+func _enter_sky_aim() -> void:
+	if sky_aiming: return
+	sky_aiming = true
+	_sky_pitch_rest = actor._camera_pitch
+	actor._camera_pitch = deg_to_rad(50.0)
+	actor._update_camera()
+
+func _manual_aim_direction() -> Vector3:
+	var origin := actor.global_position + Vector3(0, 1.35, 0)
+	var camera := actor.camera
+	var end := camera.global_position - camera.global_basis.z * RANGE
+	var query := PhysicsRayQueryParameters3D.create(camera.global_position, end, 1 | actor.combat.target_collision_mask)
+	query.exclude = [actor.get_rid()]
+	var hit := actor.get_world_3d().direct_space_state.intersect_ray(query)
+	return ((hit.position if not hit.is_empty() else end) - origin).normalized()
 
 func start_hawk() -> bool:
 	return hawk_skill.begin()
@@ -459,6 +483,10 @@ func interrupt() -> void:
 
 func cancel_charge() -> void:
 	charging = false
+	if sky_aiming:
+		actor._camera_pitch = _sky_pitch_rest
+	sky_aiming = false
+	actor._update_camera()
 	charge_time = 0.0
 	locked_target = null
 	if _marker:
@@ -489,10 +517,12 @@ func release_arrow() -> bool:
 		cancel_charge()
 		return false
 	# Revalidate at release: no stale lock through a wall or onto a dead target.
-	if not _target_valid(locked_target):
+	if sky_aiming or _hawk_shooting_window() or not _target_valid(locked_target):
 		locked_target = null
 	var origin: Vector3 = actor.global_position + Vector3(0, 1.35, 0)
 	var direction: Vector3 = -actor.camera.global_basis.z if actor.camera else -actor.visuals.global_basis.z
+	if sky_aiming or _hawk_shooting_window():
+		direction = _manual_aim_direction()
 	if is_instance_valid(locked_target):
 		direction = (locked_target.global_position + Vector3(0, 0.9, 0) - origin).normalized()
 	var ratio: float = clampf(charge_time / MAX_CHARGE, 0.0, 1.0)
@@ -572,7 +602,11 @@ func _physics_process(delta: float) -> void:
 			cancel_charge()
 		else:
 			charge_time = minf(MAX_CHARGE, charge_time + delta)
-			if not _target_valid(locked_target):
+			if _hawk_shooting_window():
+				_enter_sky_aim()
+			if sky_aiming:
+				locked_target = null
+			elif not _target_valid(locked_target):
 				locked_target = _find_target()
 			if is_instance_valid(locked_target):
 				var to_target: Vector3 = locked_target.global_position - actor.global_position
@@ -754,6 +788,10 @@ func _process(_delta: float) -> void:
 		_label.text = ("COUNTER · TÊN LỚN + BẬT LÙI" if counter_active else ("PERFECT DODGE · PHẢN CÔNG SẴN SÀNG" if actor.is_counter_window_active() else ("ĐỠ BẰNG CUNG" if actor.is_blocking else ("MỒI CÁ · DIỀU HÂU" if hawk_skill.casting else ("ĐÃ KHÓA MỤC TIÊU" if charging and is_instance_valid(locked_target) else ("NGẮM TỰ DO" if charging else ""))))))
 	if _label and bait_ultimate.active():
 		_label.text += "\n" + bait_ultimate.status()
+	if _label and sky_aiming:
+		_label.text = "NGẮM LÊN TRỜI · THẢ CHUỘT TRÁI ĐỂ BẮN"
+	elif _label and _hawk_shooting_window():
+		_label.text += "\nGIỮ CHUỘT TRÁI · NGẮM LÊN TRỜI"
 	if _label and seeking_active:
 		_label.text += "\nTRUY ĐUỔI · KHÓA MỤC TIÊU · %d/3" % seeking_shots
 	if _label and dash_active:
@@ -816,6 +854,11 @@ func _update_bow() -> void:
 			_bow.rotation = Vector3.ZERO
 	if counter_active:
 		ratio = maxf(0.0, 1.0 - counter_elapsed / 0.12)
+	if (sky_aiming or (_hawk_shooting_window() and releasing)) and not actor.is_blocking:
+		var pitch := asin(clampf(_manual_aim_direction().y, -1.0, 1.0))
+		var tilt := Basis(Vector3.RIGHT, pitch)
+		_bow.position = Vector3(0, 1.35, 0) + tilt * (_bow.position - Vector3(0, 1.35, 0))
+		_bow.basis = tilt * _bow.basis
 	if bait_ultimate.input_busy():
 		ratio = 0.75
 	var draw_dist: float = 0.26
@@ -902,6 +945,10 @@ func _build_hud() -> void:
 	var layer: CanvasLayer = CanvasLayer.new()
 	layer.layer = 15
 	add_child(layer)
+	reticle_hud = ArcherReticleHUD.new()
+	reticle_hud.name = "ArcherReticleHUD"
+	layer.add_child(reticle_hud)
+	reticle_hud.setup(self, actor)
 	_label = Label.new()
 	layer.add_child(_label)
 	_label.set_anchors_and_offsets_preset(Control.PRESET_CENTER_BOTTOM)

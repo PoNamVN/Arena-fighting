@@ -413,7 +413,8 @@ func _unhandled_input(event: InputEvent) -> void:
 		var motion: InputEventMouseMotion = event as InputEventMouseMotion
 		_camera_yaw -= motion.relative.x * mouse_sensitivity
 		_camera_pitch -= motion.relative.y * mouse_sensitivity
-		_camera_pitch = clampf(_camera_pitch, deg_to_rad(min_pitch), deg_to_rad(max_pitch))
+		var aim_max_pitch := 85.0 if archer_combat and archer_combat.sky_aiming else max_pitch
+		_camera_pitch = clampf(_camera_pitch, deg_to_rad(min_pitch), deg_to_rad(aim_max_pitch))
 
 		_update_camera()
 
@@ -2396,12 +2397,15 @@ func _update_camera(_delta: float = 0.0) -> void:
 
 	if is_third_person:
 		camera_pivot.position = Vector3(0, 1.62, 0)
+		var sky_aim: bool = archer_combat != null and archer_combat.sky_aiming
+		if sky_aim:
+			camera_pivot.position = Basis(Vector3.UP, _camera_yaw) * Vector3(.85, 1.7, 0)
 		camera_pivot.rotation.y = _camera_yaw
 		camera_pivot.rotation.x = _camera_pitch + _cam_recoil_pitch
 		camera_pivot.rotation.z = 0.0
 		if spring_arm:
-			spring_arm.spring_length = third_person_distance
-			spring_arm.rotation.x = deg_to_rad(-12.0)
+			spring_arm.spring_length = 1.8 if sky_aim else third_person_distance
+			spring_arm.rotation.x = 0.0 if sky_aim else deg_to_rad(-12.0)
 		if camera:
 			camera.rotation = Vector3.ZERO
 	else:

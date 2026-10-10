@@ -37,7 +37,7 @@ func _run() -> void:
 		var proxy_outside := 0.0
 		var bones_outside := 0.0
 		var escaped_phases: Dictionary = {}
-		for tick in range(660):
+		for tick in range(900):
 			await frames(1)
 			var positions: Array[Vector3] = [enemy.global_position]
 			if enemy.is_ragdoll_active() and enemy.ragdoll.simulator.is_simulating_physics():

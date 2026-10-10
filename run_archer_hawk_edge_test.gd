@@ -19,7 +19,7 @@ func _run() -> void:
 	bow.start_hawk()
 	await frames(22)
 	enemy.position.x = 1.1
-	await frames(360)
+	await frames(750)
 	check(bow.hawk_skill.grabs == 1 and bow.hawk_skill.landings == 1, "Fish follows a moving target after release")
 	bow = await fresh_volley()
 	bow.start_hawk()
@@ -75,7 +75,7 @@ func _run() -> void:
 	bow.start_hawk()
 	var bounded := true
 	var bounds: Node = arena.get_node("ArenaPlayBounds")
-	for i in range(360):
+	for i in range(750):
 		await frames(1)
 		var local: Vector3 = arena.to_local(enemy.global_position)
 		for j in range(bounds._normals.size()):
@@ -88,7 +88,7 @@ func _run() -> void:
 	arena.add_child(dummy)
 	await frames(4)
 	bow.start_hawk()
-	await frames(360)
+	await frames(750)
 	check(bow.hawk_skill.grabs == 1 and not dummy.hawk_carry.active() and absf(dummy.current_hp - 76) < .2, "Static practice dummy supports swept capture and landing")
 	arena.queue_free()
 	await frames(3)

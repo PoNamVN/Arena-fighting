@@ -52,7 +52,7 @@ func _run() -> void:
 	check(skill.casting, "Physical Z key dispatches fish skill in the actual game scene")
 	var maximum_height := 0.0
 	var inverted := false
-	for i in range(360):
+	for i in range(750):
 		await frames(1)
 		maximum_height = maxf(maximum_height, dummy.global_position.y)
 		inverted = inverted or dummy.hawk_carry.inversion > .99

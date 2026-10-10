@@ -37,7 +37,7 @@ func _run() -> void:
 		var feet_pinned := true
 		var hangs_upside_down := true
 		var limb_motion := 0.0
-		for i in range(660):
+		for i in range(900):
 			await frames(1)
 			showcase.global_position = enemy.global_position + Vector3(5, 3, 6)
 			showcase.look_at(enemy.global_position + Vector3.UP)

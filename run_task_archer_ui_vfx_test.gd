@@ -75,7 +75,7 @@ func _run_tests() -> void:
 		"Reticle=%s, AbilityDock=%s" % [reticle != null, dock != null])
 
 	# -------------------------------------------------------------
-	# TEST 3: Dynamic Aim Reticle and Charge Ratio Response
+	# TEST 3: Simple reticle is restricted to FPS and sky aim
 	# -------------------------------------------------------------
 	combat.start_charge()
 	var charging_started: bool = combat.charging
@@ -85,8 +85,7 @@ func _run_tests() -> void:
 		await process_frame
 		safety_frames += 1
 
-	var mid_charge_ratio: float = reticle._charge_ratio if reticle else 0.0
-	var mid_charge_ok: bool = mid_charge_ratio >= 0.2 and mid_charge_ratio < 0.9
+	var tps_hidden: bool = reticle != null and not reticle.visible
 
 	# Complete to full max charge (1.2s total)
 	while combat.charging and combat.charge_time < combat.MAX_CHARGE and safety_frames < 300:
@@ -94,10 +93,14 @@ func _run_tests() -> void:
 		safety_frames += 1
 	await process_frame
 
-	var max_charge_ok: bool = reticle._is_max_charged if reticle else false
-	var t3_pass: bool = charging_started and mid_charge_ok and max_charge_ok
-	_record("TEST 3: Dynamic Reticle tracks bow draw and triggers Max Charge", t3_pass,
-		"Mid ratio=%.2f, IsMaxCharge=%s" % [mid_charge_ratio, max_charge_ok])
+	player.set_third_person(false)
+	await process_frame
+	await process_frame
+	var fps_visible: bool = reticle != null and reticle.visible
+	var t3_pass: bool = charging_started and tps_hidden and fps_visible
+	_record("TEST 3: Simple reticle hides in TPS and shows in FPS", t3_pass,
+		"TPS hidden=%s, FPS visible=%s" % [tps_hidden, fps_visible])
+	player.set_third_person(true)
 
 	# -------------------------------------------------------------
 	# TEST 4: Bow Charge Wisps & Dynamic Light in VFX Manager
