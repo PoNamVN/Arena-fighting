@@ -29,6 +29,9 @@ var _finish_started_usec:int=0
 var _finish_idle_usec:int=0
 var _result_player_hp:float=-1.0
 var _result_opponent_hp:float=-1.0
+var _victory_frame: Texture2D
+var _victory_background: TextureRect
+var _combat_hud: Array[Control] = []
 
 
 func _ready() -> void:
@@ -47,6 +50,7 @@ func _ready() -> void:
 	player.health_component.died.connect(_schedule_finish)
 	opponent.health_component.died.connect(_schedule_finish)
 	_build_hud()
+	player.giant_sword_ultimate.finisher_frame_ready.connect(_receive_victory_frame)
 	_update_hud()
 
 
@@ -162,9 +166,13 @@ func _await_finish_presentation() -> void:
 	if not _finishing_presentation_busy():
 		_finish_round()
 		return
+	var presentation_timeout: float = FINISH_WATCHDOG_SECONDS
 	while is_inside_tree() and round_state==RoundState.ENDING:
 		var now:int=Time.get_ticks_usec()
-		if now-_finish_started_usec>=int(FINISH_WATCHDOG_SECONDS*1000000):
+		for actor: PlayerController in [player, opponent]:
+			if actor.giant_sword_ultimate:
+				presentation_timeout = maxf(presentation_timeout, actor.giant_sword_ultimate.finish_presentation_timeout_seconds())
+		if now-_finish_started_usec>=int(presentation_timeout*1000000):
 			push_warning("Round-end presentation timed out; restoring result/camera safely.")
 			_finish_round()
 			return
@@ -206,7 +214,34 @@ func _finish_round() -> void:
 	center_label.text += "\nHết giờ · so HP còn lại" if time_remaining <= 0.0 else ("\nBạn đã bị hạ gục" if hp <= 0.0 else "\nAI đã bị hạ gục")
 	center_label.visible = true
 	result_buttons.visible = true
+	if _victory_frame and hp > enemy_hp and enemy_hp <= 0.0:
+		_show_finisher_victory()
 	player._set_mouse_captured(false)
+
+
+func _receive_victory_frame(frame: Texture2D) -> void:
+	if round_state != RoundState.ENDING or _result_player_hp <= _result_opponent_hp or _result_opponent_hp > 0.0:
+		return
+	_victory_frame = frame
+	_victory_background.texture = frame
+	_victory_background.show()
+	player.giant_sword_ultimate.hold_victory_camera()
+	# Reveal the result inside the paused cinematic, after its orbit has stopped.
+	get_node("PracticeHUD").show()
+	_show_finisher_victory()
+	player._set_mouse_captured(false)
+
+
+func _show_finisher_victory() -> void:
+	for control in _combat_hud: control.hide()
+	center_label.text = "BẠN THẮNG!"
+	center_label.show()
+	center_label.add_theme_color_override("font_color", Color(1.0, .94, .72))
+	center_label.anchor_top = .80; center_label.anchor_bottom = .80
+	center_label.offset_top = -40; center_label.offset_bottom = 20
+	result_buttons.anchor_top = .90; result_buttons.anchor_bottom = .90
+	result_buttons.offset_top = 0; result_buttons.offset_bottom = 44
+	result_buttons.show()
 
 
 func _update_hud() -> void:
@@ -251,11 +286,15 @@ func replay() -> void:
 
 
 func _prepare_scene_exit() -> void:
+	_victory_frame = null
+	_victory_background.texture = null
+	_victory_background.hide()
 	round_state=RoundState.FINISHED
 	brain.enabled = false
 	for actor: PlayerController in [player, opponent]:
 		if actor.active_ability_action and actor.active_ability_action.is_active():
 			actor.active_ability_action.cancel()
+		actor.giant_sword_ultimate.release_victory_camera()
 		if actor.frost:
 			actor.frost.clear()
 		if actor.polymorph:
@@ -273,11 +312,19 @@ func _build_hud() -> void:
 	var layer: CanvasLayer = CanvasLayer.new()
 	layer.name = "PracticeHUD"
 	layer.layer = 20
+	layer.process_mode = Node.PROCESS_MODE_ALWAYS
 	add_child(layer)
 	var root: Control = Control.new()
 	layer.add_child(root)
 	root.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	root.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_victory_background = TextureRect.new()
+	root.add_child(_victory_background)
+	_victory_background.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	_victory_background.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	_victory_background.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_COVERED
+	_victory_background.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_victory_background.hide()
 	var top: PanelContainer = PanelContainer.new()
 	root.add_child(top)
 	top.set_anchors_and_offsets_preset(Control.PRESET_TOP_WIDE)
@@ -285,6 +332,7 @@ func _build_hud() -> void:
 	top.offset_right = -20
 	top.offset_top = 16
 	top.offset_bottom = 96
+	_combat_hud.append(top)
 	var row: HBoxContainer = HBoxContainer.new()
 	row.add_theme_constant_override("separation", 24)
 	top.add_child(row)
@@ -307,6 +355,7 @@ func _build_hud() -> void:
 	warning_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	warning_label.add_theme_color_override("font_color", Color(1.0, 0.6, 0.2))
 	warning_label.visible = false
+	_combat_hud.append(warning_label)
 	center_label = _label(root, "CHUẨN BỊ\n3", 46)
 	center_label.anchor_left = 0.5
 	center_label.anchor_right = 0.5
@@ -339,6 +388,7 @@ func _build_hud() -> void:
 	bottom.offset_right = -20
 	bottom.offset_top = -130
 	bottom.offset_bottom = -12
+	_combat_hud.append(bottom)
 	abilities_label = _label(bottom, "", 18)
 	if not player.archer_combat and not player.wizard_combat:
 		var controls: String = "WASD Di chuyển · LMB Đánh · RMB Đỡ · Q Né · Z/X/C/V Skill · B FPS/TPS"

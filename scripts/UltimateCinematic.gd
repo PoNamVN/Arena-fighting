@@ -51,7 +51,8 @@ func _process(_delta: float) -> void:
  if not active:return
  var owner: Node=_owner.get_ref()
  if not is_instance_valid(owner) or not owner.is_inside_tree():_release();return
- if Time.get_ticks_usec()-_started_usec>int(WATCHDOG_SECONDS*1000000):
+ var timeout: float = owner.cinematic_timeout_seconds() if owner.has_method("cinematic_timeout_seconds") else WATCHDOG_SECONDS
+ if Time.get_ticks_usec()-_started_usec>int(timeout*1000000):
   if owner.has_method("cancel_cinematic"):owner.cancel_cinematic()
   if active:_release()
 

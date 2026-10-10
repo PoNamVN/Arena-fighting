@@ -3,6 +3,12 @@ extends Node3D
 
 const DROP_HEIGHT: float = 46.0
 const CLOUD_HEIGHT: float = 42.0
+const INITIAL_EMBED_DEPTH: float = 2.4
+const FINAL_EMBED_DEPTH: float = 5.8
+const WIND_SPEED: float = 30.0
+const WIND_DRAG_SECONDS: float = 1.6
+const IMPACT_HOLD_SECONDS: float = .09
+const DUST_CLEAR_SECONDS: float = 4.4
 var _sigil: MeshInstance3D
 var _sigil_material: ShaderMaterial
 var _fall_wake: MeshInstance3D
@@ -36,6 +42,22 @@ var _cloud_quality: int = 1
 var _cracks: MeshInstance3D
 var _crack_material: ShaderMaterial
 var _fracture_radius: float = 20.0
+var _impact_smoke: Array[MeshInstance3D] = []
+var _impact_smoke_materials: Array[ShaderMaterial] = []
+var _pressure_waves: Array[MeshInstance3D] = []
+var _pressure_materials: Array[ShaderMaterial] = []
+var _sand: MultiMeshInstance3D
+var _sand_batch: MultiMesh
+var _sand_material: StandardMaterial3D
+var _burst_started: bool = false
+var _floor_wave: MultiMeshInstance3D
+var _floor_batch: MultiMesh
+var _floor_material: StandardMaterial3D
+var _floor_lifts: Array[float] = []
+var _floor_planes := PackedVector4Array()
+var _wind_audio: AudioStreamPlayer3D
+var _wind_started: bool = false
+var _sand_transforms: Array[Transform3D] = []
 
 
 func _ready() -> void:
@@ -97,6 +119,38 @@ func _ready() -> void:
 		add_child(cloud)
 		clouds.append(cloud)
 	_cloud_material = _cloud_layers[0]
+	# Ground-level rolling dust is separate from the cloud bank above the sword.
+	var impact_quad := QuadMesh.new()
+	impact_quad.size = Vector2(7, 5)
+	for index in 144:
+		var puff := MeshInstance3D.new()
+		puff.mesh = impact_quad
+		puff.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		var material := ShaderMaterial.new()
+		material.shader = preload("res://assets/shaders/knight_ultimate_impact_smoke.gdshader")
+		material.set_shader_parameter("noise_texture", smoke)
+		material.set_shader_parameter("layer", float(index))
+		puff.material_override = material
+		add_child(puff)
+		_impact_smoke.append(puff)
+		_impact_smoke_materials.append(material)
+	_build_pressure_waves(smoke)
+	_sand = MultiMeshInstance3D.new()
+	_sand.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	_sand_batch = MultiMesh.new()
+	_sand_batch.transform_format = MultiMesh.TRANSFORM_3D
+	_sand_batch.use_colors = true
+	var grain := BoxMesh.new()
+	grain.size = Vector3.ONE
+	_sand_batch.mesh = grain
+	_sand_batch.instance_count = 128
+	_sand_transforms.resize(128)
+	_sand_batch.visible_instance_count = 0
+	_sand.multimesh = _sand_batch
+	_sand_material = _make_material(Color(.6, .52, .4), false)
+	_sand_material.vertex_color_use_as_albedo = true
+	_sand.material_override = _sand_material
+	add_child(_sand)
 	var dust_material: StandardMaterial3D = _make_material(Color(0.35, 0.25, 0.14), false)
 	var dust: MultiMeshInstance3D = MultiMeshInstance3D.new()
 	dust.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
@@ -119,6 +173,12 @@ func _ready() -> void:
 	_impact_audio.stream = preload("res://assets/audio/ultimate_impact.wav")
 	_impact_audio.volume_db = -5
 	add_child(_impact_audio)
+	_wind_audio = AudioStreamPlayer3D.new()
+	_wind_audio.stream = _wind_sound()
+	_wind_audio.volume_db = -12.0
+	_wind_audio.max_distance = 80.0
+	_wind_audio.attenuation_model = AudioStreamPlayer3D.ATTENUATION_DISABLED
+	add_child(_wind_audio)
 	_build_extras()
 	stop()
 
@@ -173,6 +233,7 @@ func begin(origin: Vector3, radius: float) -> void:
 	_chips_started = false
 	_cloud_split = 0.0
 	_cloud_time = 0.0
+	_fall_audio.volume_db = -8.0
 	for material in _cloud_layers:
 		material.set_shader_parameter("opacity", .82)
 		material.set_shader_parameter("origin", origin)
@@ -213,13 +274,19 @@ func update_startup(remaining: float, duration: float) -> void:
 	_fall_wake.scale = Vector3.ONE * smoothstep(0.02, 0.2, progress)
 	_cloud_split = clampf((CLOUD_HEIGHT + 2.0 - sword.position.y) / 10.0, 0.0, 1.0)
 	_update_clouds()
+	_update_inflow(progress)
 
 
 func impact() -> void:
 	_fall_wake.hide()
 	_sigil.hide()
+	ring.hide()
 	_fall_particles.emitting = false
-	_burst.impact(global_position, _radius)
+	_burst_started = false
+	_wind_started = false
+	for puff in _impact_smoke: puff.hide()
+	_floor_material.albedo_color = _burst.ground_color.darkened(.12)
+	_update_floor_wave(0.0)
 	_crater.show()
 	_cracks.show()
 	_cracks.position.y = _burst.ground_y - global_position.y + .035
@@ -228,9 +295,11 @@ func impact() -> void:
 	_crack_material.set_shader_parameter("opacity", 1.0)
 	_crack_material.set_shader_parameter("ground_color", Vector3(_burst.ground_color.r, _burst.ground_color.g, _burst.ground_color.b))
 	_crater_material.albedo_color = _burst.ground_color.darkened(.28)
-	_impact_light.light_energy = 5.0
+	_sand_material.albedo_color = _burst.ground_color
+	_sand_batch.visible_instance_count = [48, 88, 128][_cloud_quality]
+	_impact_light.light_energy = 12.0
 	_impact_light.position.y = 1.0
-	sword.position.y = -0.4
+	sword.position.y = _burst.ground_y - global_position.y - INITIAL_EMBED_DEPTH
 	_impact_elapsed = 0.0
 	_fall_audio.stop()
 	_impact_audio.play()
@@ -242,32 +311,49 @@ func update_impact(delta: float) -> void:
 	if _impact_elapsed < 0:
 		return
 	_impact_elapsed += delta
-	_impact_light.light_energy = maxf(0, 5.0 * (1.0 - _impact_elapsed / .12))
+	if not _burst_started and _impact_elapsed >= IMPACT_HOLD_SECONDS:
+		_burst_started = true
+		_burst.impact(global_position, _radius)
+	if not _wind_started:
+		var camera: Camera3D = get_viewport().get_camera_3d()
+		var camera_radius: float = Vector2(camera.global_position.x - global_position.x, camera.global_position.z - global_position.z).length() if camera else 0.0
+		if _impact_elapsed >= wind_arrival_time(camera_radius):
+			_wind_started = true
+			_wind_audio.play()
+	_update_floor_wave(_impact_elapsed)
+	# A hard first bite, then the weight drives the blade further into the floor.
+	sword.position.y = _burst.ground_y - global_position.y - lerpf(INITIAL_EMBED_DEPTH, FINAL_EMBED_DEPTH, 1.0 - pow(1.0 - clampf((_impact_elapsed - IMPACT_HOLD_SECONDS) / .24, 0, 1), 3.0))
+	_update_impact_smoke(_impact_elapsed)
+	_update_pressure_waves(_impact_elapsed)
+	_update_sand(_impact_elapsed)
+	_impact_light.light_energy = maxf(0, 12.0 * (1.0 - _impact_elapsed / .14))
 	for material in _sword_materials:
 		material.set_shader_parameter("impact_heat", maxf(0, 1.0 - _impact_elapsed / .32))
 	_update_crater(_impact_elapsed)
-	var time: float = _impact_elapsed
-	var wave_radius: float = lerpf(1.0, _radius * 2.5, clampf(time / 0.75, 0, 1))
+	var time: float = maxf(0.0, _impact_elapsed - IMPACT_HOLD_SECONDS)
+	var wave_radius: float = wind_front_radius(_impact_elapsed)
 	shockwave.position.y = 0.15
 	shockwave.scale = Vector3(wave_radius, 0.15, wave_radius)
-	_shock_material.albedo_color.a = maxf(0.0, 0.5 * (1.0 - time / 0.9))
+	_shock_material.albedo_color.a = maxf(0.0, 0.22 * (1.0 - time / .65))
 	for material in _cloud_layers: material.set_shader_parameter("opacity", .82 * (1.0 - smoothstep(.3, 1.6, time)))
 	_crack_material.set_shader_parameter("spread", smoothstep(0.0, .55, time))
-	_crack_material.set_shader_parameter("opacity", 1.0 - smoothstep(1.55, 2.0, time))
+	_crack_material.set_shader_parameter("opacity", 1.0 - smoothstep(3.8, 4.9, time))
 	for index: int in range(debris.size()):
 		var angle: float = TAU * float(index) / float(debris.size())
-		var distance: float = (2.0 + float(index % 7)) * time
-		var height: float = maxf(0.1, (3.0 + float(index % 5)) * time - 5.0 * time * time)
-		var position: Vector3 = Vector3(cos(angle) * distance, height, sin(angle) * distance)
-		var size: float = (0.2 + float(index % 4) * 0.13) * maxf(0, 1 - time / 1.8)
+		var launch_speed: float = 26.0 if index % 8 == 0 else 7.0 + float(index % 7) * 1.4
+		var distance: float = launch_speed * 1.2 * (1.0 - exp(-time / 1.2))
+		var launch_height: float = 8.0 if index % 8 == 0 else 3.0 + float(index % 5) * .8
+		var height: float = maxf(.08, launch_height * time - 5.0 * time * time)
+		var position: Vector3 = Vector3(cos(angle) * distance, _burst.ground_y - global_position.y + height, sin(angle) * distance)
+		var size: float = (.12 + float(index % 4) * .08) * (1.0 - smoothstep(3.7, 4.6, time))
 		debris[index] = Transform3D(Basis.from_euler(Vector3(time * (index % 4), angle, time * .4)).scaled(Vector3.ONE * size), position)
 		_debris_batch.set_instance_transform(index, debris[index])
 
 
 func update_recovery(remaining: float, duration: float) -> void:
-	var progress: float = clampf(1.0 - remaining / maxf(duration, 0.001), 0, 1)
 	# Solid during descent/impact; only dissolve once embedded in the ground.
-	var dissolve: float = clampf((progress - 0.3) / 0.7, 0, 1)
+	var time: float = maxf(_impact_elapsed, duration - remaining)
+	var dissolve: float = smoothstep(3.6, 4.75, time)
 	for material: ShaderMaterial in _sword_materials:
 		material.set_shader_parameter("dissolve", dissolve)
 	if dissolve > .01 and not _chips_started:
@@ -278,6 +364,10 @@ func update_recovery(remaining: float, duration: float) -> void:
 
 
 func stop() -> void:
+	for puff in _impact_smoke: puff.hide()
+	for wave in _pressure_waves: wave.hide()
+	if _floor_batch: _floor_batch.visible_instance_count = 0
+	if _sand_batch: _sand_batch.visible_instance_count = 0
 	if _burst: _burst.stop()
 	if _fall_particles: _fall_particles.emitting = false
 	if _metal_shards: _metal_shards.emitting = false
@@ -290,6 +380,7 @@ func stop() -> void:
 		_sigil.hide()
 	visible = false
 	_impact_elapsed = -1.0
+	if _wind_audio: _wind_audio.stop()
 	if _fall_audio:
 		_fall_audio.stop()
 	if _impact_audio:
@@ -298,6 +389,149 @@ func stop() -> void:
 		cloud.visible = false
 	if _debris_batch:
 		_debris_batch.visible_instance_count = 0
+
+
+static func wind_front_radius(time: float) -> float:
+	return 1.2 + WIND_SPEED * WIND_DRAG_SECONDS * (1.0 - exp(-maxf(time - IMPACT_HOLD_SECONDS, 0.0) / WIND_DRAG_SECONDS))
+
+
+static func dust_envelope(time: float) -> float:
+	return smoothstep(IMPACT_HOLD_SECONDS, IMPACT_HOLD_SECONDS + .12, time) * (1.0 - smoothstep(2.4, DUST_CLEAR_SECONDS, time))
+
+
+static func wind_arrival_time(radius: float) -> float:
+	return IMPACT_HOLD_SECONDS - WIND_DRAG_SECONDS * log(clampf(1.0 - (radius - 1.2) / (WIND_SPEED * WIND_DRAG_SECONDS), .001, 1.0))
+
+
+func _update_impact_smoke(time: float) -> void:
+	var manager := get_node_or_null("/root/VFXManager")
+	var enabled: bool = not manager or manager.enabled
+	var fade: float = dust_envelope(time)
+	var front: float = wind_front_radius(time)
+	var settling: float = smoothstep(2.5, DUST_CLEAR_SECONDS, time)
+	var ground: Color = _burst.ground_color.lerp(Color(.40, .37, .33), .65)
+	for i in _impact_smoke.size():
+		var row: int = i / 24
+		var angle: float = TAU * (i % 24) / 24.0 + row * .11 + sin(time * 1.6 + i) * .045
+		# Three dense curls follow the front; a broad wake and a rising source plume fill its interior.
+		var distance: float = maxf(.8, front - row * 3.2) if row < 3 else front * [.0, .0, .0, .7, .38, .12][row]
+		var rise: float = smoothstep(IMPACT_HOLD_SECONDS, 1.1, time)
+		var height: float = 1.1 + rise * (1.6 + row * .5) + sin(time * 3.2 + i * 1.7) * .6 * rise
+		if row == 5: height += rise * 3.5
+		height = lerpf(height, .75 + row * .25, settling)
+		_impact_smoke[i].position = Vector3(cos(angle) * distance, _burst.ground_y - global_position.y + height, sin(angle) * distance)
+		var grow: float = .35 + smoothstep(IMPACT_HOLD_SECONDS, 1.1, time) * (2.0 + row * .16)
+		_impact_smoke[i].scale = Vector3(grow, grow * (.9 + row * .06), grow)
+		_impact_smoke[i].visible = enabled and fade > .001 and (i % 3 == 0 if _cloud_quality == 0 else (i % 3 != 2 if _cloud_quality == 1 else true))
+		_impact_smoke_materials[i].set_shader_parameter("flow", time)
+		_impact_smoke_materials[i].set_shader_parameter("opacity", fade * [.98, .95, .90, .84, .80, .86][row])
+		_impact_smoke_materials[i].set_shader_parameter("turbulence", 1.0 - settling * .7)
+		_impact_smoke_materials[i].set_shader_parameter("dust_color", Vector3(ground.r, ground.g, ground.b))
+
+
+func _update_inflow(progress: float) -> void:
+	var manager := get_node_or_null("/root/VFXManager")
+	var enabled: bool = not manager or manager.enabled
+	var gather: float = smoothstep(.50, 1.0, progress)
+	var color: Color = _burst.ground_color.lerp(Color(.4, .37, .33), .65)
+	for i in 24:
+		var angle: float = TAU * i / 24.0 + gather * .5
+		var radius: float = lerpf(7.0 + (i % 4) * 1.3, 1.4 + (i % 3) * .8, gather)
+		_impact_smoke[i].position = Vector3(cos(angle) * radius, _burst.ground_y - global_position.y + .3 + gather * .8, sin(angle) * radius)
+		_impact_smoke[i].scale = Vector3(1.0, .25 + gather * .25, 1.0) * (.4 + gather * .5)
+		_impact_smoke[i].visible = enabled and gather > .001 and (i % 3 == 0 if _cloud_quality == 0 else true)
+		_impact_smoke_materials[i].set_shader_parameter("opacity", gather * .45)
+		_impact_smoke_materials[i].set_shader_parameter("flow", -gather * 2.0)
+		_impact_smoke_materials[i].set_shader_parameter("turbulence", .6)
+		_impact_smoke_materials[i].set_shader_parameter("dust_color", Vector3(color.r, color.g, color.b))
+	_sand_batch.visible_instance_count = [48, 88, 128][_cloud_quality] if enabled and gather > .001 else 0
+	for i in _sand_batch.visible_instance_count:
+		var angle: float = i * 2.3999632 + gather * .6
+		var radius: float = lerpf(3.0 + (i % 16) * .45, .6 + (i % 16) * .15, gather)
+		var at := Vector3(cos(angle) * radius, _burst.ground_y - global_position.y + gather * (.15 + (i % 7) * .11), sin(angle) * radius)
+		var size: float = (.035 + (i % 5) * .017) * gather
+		_sand_transforms[i] = Transform3D(Basis.from_euler(Vector3(gather * i, angle, gather)).scaled(Vector3.ONE * size), at)
+		_sand_batch.set_instance_transform(i, _sand_transforms[i])
+	_fall_audio.volume_db = lerpf(-8.0, -18.0, gather)
+
+
+func _wind_sound() -> AudioStreamWAV:
+	# Filtered air rush: its playback begins when the visible front reaches the camera.
+	var samples := PackedByteArray()
+	var random := RandomNumberGenerator.new()
+	random.seed = 1729
+	var low: float = 0.0
+	var slow: float = 0.0
+	for i in 66150:
+		var time: float = i / 22050.0
+		low = lerpf(low, random.randf_range(-1.0, 1.0), .18)
+		slow = lerpf(slow, low, .035)
+		var envelope: float = smoothstep(0.0, .07, time) * exp(-time * 1.6) * (1.0 - smoothstep(2.4, 3.0, time))
+		var sample: int = roundi(clampf((low * .65 + slow * 1.8) * envelope, -1.0, 1.0) * 32767.0)
+		samples.append(sample & 255)
+		samples.append((sample >> 8) & 255)
+	var stream := AudioStreamWAV.new()
+	stream.format = AudioStreamWAV.FORMAT_16_BITS
+	stream.mix_rate = 22050
+	stream.data = samples
+	return stream
+
+
+func _build_pressure_waves(noise: Texture2D) -> void:
+	var vertices := PackedVector3Array()
+	var uvs := PackedVector2Array()
+	for sector in 96:
+		for row in 8:
+			for offset: Vector2 in [Vector2(0, 0), Vector2(1, 0), Vector2(1, 1), Vector2(0, 0), Vector2(1, 1), Vector2(0, 1)]:
+				var u: float = (sector + offset.x) / 96.0
+				var v: float = (row + offset.y) / 8.0
+				vertices.append(Vector3(cos(u * TAU), 0, sin(u * TAU)))
+				uvs.append(Vector2(u, v))
+	var arrays: Array = []; arrays.resize(Mesh.ARRAY_MAX)
+	arrays[Mesh.ARRAY_VERTEX] = vertices; arrays[Mesh.ARRAY_TEX_UV] = uvs
+	var mesh := ArrayMesh.new(); mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
+	for i in 3:
+		var wave := MeshInstance3D.new(); wave.mesh = mesh
+		wave.custom_aabb = AABB(Vector3(-60, 0, -60), Vector3(120, 16, 120))
+		wave.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		var material := ShaderMaterial.new()
+		material.shader = preload("res://assets/shaders/knight_ultimate_pressure_wave.gdshader")
+		material.set_shader_parameter("noise_texture", noise)
+		wave.material_override = material; add_child(wave)
+		_pressure_waves.append(wave); _pressure_materials.append(material)
+
+
+func _update_pressure_waves(time: float) -> void:
+	var manager := get_node_or_null("/root/VFXManager")
+	for i in _pressure_waves.size():
+		var age: float = time - i * .16
+		_pressure_waves[i].visible = age > IMPACT_HOLD_SECONDS and age < 2.8 and (not manager or manager.enabled) and i <= _cloud_quality
+		_pressure_waves[i].position.y = _burst.ground_y - global_position.y
+		_pressure_materials[i].set_shader_parameter("radius", wind_front_radius(age))
+		_pressure_materials[i].set_shader_parameter("width", 1.5 + smoothstep(0.0, 1.2, age) * 3.0)
+		_pressure_materials[i].set_shader_parameter("height", .7 + smoothstep(0.0, .8, age) * 2.2)
+		_pressure_materials[i].set_shader_parameter("opacity", smoothstep(0.0, .06, age) * (1.0 - smoothstep(.9, 2.8, age)))
+		_pressure_materials[i].set_shader_parameter("flow", age)
+
+
+func _update_sand(time: float) -> void:
+	var manager := get_node_or_null("/root/VFXManager")
+	_sand_batch.visible_instance_count = [48, 88, 128][_cloud_quality] if not manager or manager.enabled else 0
+	for i in _sand_batch.visible_instance_count:
+		var angle: float = i * 2.3999632
+		# The front picks sand up from successive patches of floor, not all at once.
+		var pickup_radius: float = .5 + (i % 16) * 1.05
+		var age: float = maxf(0.0, time - wind_arrival_time(pickup_radius))
+		var speed: float = 12.0 + (i % 11) * 1.5
+		var distance: float = pickup_radius + speed * .85 * (1.0 - exp(-age / .85))
+		var vertical_speed: float = 1.8 + (i % 9) * .55
+		var height: float = maxf(.035, vertical_speed * age - 4.9 * age * age)
+		var at := Vector3(cos(angle) * distance, _burst.ground_y - global_position.y + height, sin(angle) * distance)
+		var size: float = (.025 + (i % 5) * .018) * smoothstep(0.0, .03, age) * (1.0 - smoothstep(3.2, 4.5, time))
+		var basis := Basis.from_euler(Vector3(time * (i % 7), angle, time * 3.0)).scaled(Vector3(size, size * .6, size * 1.8))
+		_sand_transforms[i] = Transform3D(basis, at)
+		_sand_batch.set_instance_transform(i, _sand_transforms[i])
+		_sand_batch.set_instance_color(i, Color.WHITE.darkened((i % 5) * .09))
 
 func _airflow_mesh() -> ArrayMesh:
 	# Six trails on each face, plus eight curling wakes around the blade edges.
@@ -356,6 +590,7 @@ func _build_extras() -> void:
 	_crater_batch=MultiMesh.new();_crater_batch.transform_format=MultiMesh.TRANSFORM_3D
 	var slab := BoxMesh.new();slab.size=Vector3(.75,.45,1.5);_crater_batch.mesh=slab;_crater_batch.instance_count=24
 	_crater.multimesh=_crater_batch;_crater_material=_make_material(Color(.45,.36,.25),false);_crater.material_override=_crater_material;add_child(_crater)
+	_build_floor_wave()
 	_build_cracks()
 	var manager := get_node_or_null("/root/VFXManager")
 	if manager:manager.quality_changed.connect(_quality_changed)
@@ -367,7 +602,7 @@ func _quality_changed(quality: int) -> void:
 	if _metal_shards:_metal_shards.amount_ratio=[.5,.8,1.0][clampi(quality,0,2)]
 
 func _update_crater(time: float) -> void:
-	var rise: float = smoothstep(0.0,.12,time) * (1.0-smoothstep(1.0,1.8,time))
+	var rise: float = smoothstep(0.0,.12,time) * (1.0-smoothstep(3.5,4.6,time))
 	for i in 24:
 		var angle: float = TAU*i/24.0
 		var radius: float = 1.2+(i%3)*.55
@@ -485,6 +720,56 @@ func _configure_fracture(origin: Vector3) -> void:
 				apothem=minf(apothem,distance-normal.dot(center))
 			if planes.size()==8:area=8.0*apothem*apothem*tan(PI/8.0)
 	_crack_material.set_shader_parameter("plane_count",planes.size())
+	_floor_planes = planes.duplicate()
 	planes.resize(8);_crack_material.set_shader_parameter("arena_planes",planes)
 	var offset: float=Vector2(origin.x-center.x,origin.z-center.z).length()
 	_fracture_radius=sqrt(area*.75/PI)+offset*.55
+
+
+func _build_floor_wave() -> void:
+	_floor_wave = MultiMeshInstance3D.new()
+	_floor_wave.name = "ImpactFloorWave"
+	_floor_wave.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	_floor_batch = MultiMesh.new()
+	_floor_batch.transform_format = MultiMesh.TRANSFORM_3D
+	_floor_batch.use_colors = true
+	var slab := BoxMesh.new()
+	slab.size = Vector3.ONE
+	_floor_batch.mesh = slab
+	_floor_batch.instance_count = 192
+	_floor_batch.visible_instance_count = 0
+	_floor_wave.multimesh = _floor_batch
+	_floor_material = _make_material(Color(.45, .43, .39), false)
+	_floor_material.vertex_color_use_as_albedo = true
+	_floor_wave.material_override = _floor_material
+	_floor_lifts.resize(192)
+	add_child(_floor_wave)
+
+
+func _update_floor_wave(time: float) -> void:
+	var manager := get_node_or_null("/root/VFXManager")
+	_floor_batch.visible_instance_count = 192 if not manager or manager.enabled else 0
+	var stride: int = [3, 2, 1][_cloud_quality]
+	var minimum: Vector2 = _crack_material.get_shader_parameter("arena_min")
+	var maximum: Vector2 = _crack_material.get_shader_parameter("arena_max")
+	for i in _floor_batch.visible_instance_count:
+		var band: int = i / 32
+		var radius: float = 2.0 + band * 2.0
+		var angle: float = TAU * (i % 32) / 32.0 + band * .055
+		var local := Vector3(cos(angle) * radius, _burst.ground_y - global_position.y, sin(angle) * radius)
+		var world: Vector3 = global_position + local
+		var inside: bool = world.x > minimum.x + .8 and world.x < maximum.x - .8 and world.z > minimum.y + .8 and world.z < maximum.y - .8
+		for plane in _floor_planes:
+			inside = inside and Vector3(plane.x, plane.y, plane.z).dot(world) < plane.w - .8
+		var age: float = time - wind_arrival_time(radius)
+		var phase: float = clampf(age / .52, 0.0, 1.0)
+		var lift: float = sin(phase * PI) * (.6 + (i % 5) * .12)
+		_floor_lifts[i] = lift if inside else 0.0
+		# Slabs appear as the floor breaks, rise under the front, then settle under its wake.
+		var reveal: float = smoothstep(0.0, .045, age) * (1.0 - smoothstep(3.4, 4.5, time))
+		var size: float = reveal if inside and i % stride == 0 else 0.0
+		local.y += .015 + lift
+		var basis := Basis.from_euler(Vector3(lift * .35, -angle, sin(i * 2.7) * lift * .25))
+		basis = basis.scaled(Vector3(1.35, .12 + lift * .2, .25 + radius * .12) * size)
+		_floor_batch.set_instance_transform(i, Transform3D(basis, local))
+		_floor_batch.set_instance_color(i, Color.WHITE.darkened((i % 7) * .025))

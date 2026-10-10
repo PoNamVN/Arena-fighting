@@ -25,7 +25,7 @@ func run()->void:
  check(v._cloud_split==1 and float(v._cloud_layers[0].get_shader_parameter("split"))==1,"Sword passage opens cloud layer")
  v.impact();check(v._cracks.visible and float(v._crack_material.get_shader_parameter("spread"))==0,"Cracks start at impact without early propagation")
  v.update_impact(.3);var mid:float=v._crack_material.get_shader_parameter("spread")
- v.update_impact(.3);check(mid>0 and mid<1 and float(v._crack_material.get_shader_parameter("spread"))==1,"Cracks propagate radially in first .55 seconds")
+ v.update_impact(.4);check(mid>0 and mid<1 and float(v._crack_material.get_shader_parameter("spread"))==1,"Cracks propagate radially in after the impact hold")
  check(v._cracks.mesh.get_surface_count()==1 and (v._cracks.global_transform*v._cracks.mesh.get_aabb()).size.x>30,"Branching fissures use one surface across impact area")
  var nodes:int=v.get_child_count()
  for i in 50:v.begin(Vector3.ZERO,4.5);v.impact();v.update_impact(.3);v.stop()

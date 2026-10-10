@@ -1,11 +1,24 @@
 class_name GiantSwordUltimate
 extends Node
 
+signal finisher_frame_ready(frame: Texture2D)
+
 const TARGET_DISTANCE: float = 24.0
 const ZOOM_DURATION: float = 0.45
 const CAMERA_CLEARANCE: float = 1.0
 const CLOUD_REVEAL_SECONDS: float = 0.8
 const DESCENT_PLAYBACK: float = 0.65
+const HANDOFF_SECONDS: float = 0.65
+var _coronation: Node3D
+var _coronation_active: bool = false
+var _coronation_entry: Transform3D
+var _finisher_frame_requested: bool = false
+var _victory_camera_held: bool = false
+var _coronation_orbit_angle: float = .56
+var _coronation_shot_height: float = 5.0
+var _coronation_path_ready: bool = false
+var _column_visual_layers: Dictionary = {}
+const CORONATION_COLUMN_LAYER: int = 1 << 19
 var _cloud_reveal_remaining: float = 0.0
 var aiming: bool = false
 var _presentation_active: bool = false
@@ -40,6 +53,9 @@ func _ready() -> void:
 	player = get_parent() as PlayerController
 	process_mode = Node.PROCESS_MODE_ALWAYS
 	_cinematic = get_node("/root/UltimateCinematic")
+	_coronation = preload("res://scripts/KnightCoronation.gd").new()
+	_coronation.name = "KnightCoronation"
+	add_child(_coronation)
 	_camera_query.shape = _camera_shape
 	_camera_query.collision_mask = 1
 	_camera_query.margin = 0.01
@@ -77,9 +93,17 @@ func _ready() -> void:
 
 
 func begin() -> void:
+	release_victory_camera()
+	_restore_coronation_columns()
+	_coronation_path_ready = false
+	_finisher_frame_requested = false
+	_coronation_active = false
+	_coronation.stop()
 	_presentation_active = true
 	cinematic_camera.fov = 75.0
-	for bar in _bars: bar.hide()
+	for bar in _bars:
+		bar.hide()
+		bar.color.a = 1.0
 	aiming = true
 	target_valid = false
 	_elapsed = 0.0
@@ -158,6 +182,18 @@ func _confirm_target() -> void:
 	action.custom_data["impact_origin"] = target_position
 	action.phase_timer = action.data.startup_duration
 	_select_camera_shot()
+	if player.combat.radial_ability_can_finish(action.data, target_position):
+		_select_coronation_shot()
+		_exclude_coronation_columns()
+		_coronation_active = true
+		action.custom_data["ultimate_finisher"] = true
+		action.phase_timer = _coronation.SWORD_HIT
+		_cloud_reveal_remaining = 0.0
+		cinematic_camera.global_position = target_position + _shot_back * 22.0 * _shot_distance_scale + Vector3.UP * _coronation_shot_height
+		cinematic_camera.look_at(target_position + Vector3.UP * 68.0)
+		_coronation_entry = cinematic_camera.global_transform
+		_coronation.begin(target_position, player.combat.giant_sword_vfx)
+		return
 	var back: Vector3 = _shot_back
 	cinematic_camera.global_position = target_position + back * 14.0 * _shot_distance_scale + Vector3.UP * 26.0
 	cinematic_camera.look_at(target_position + Vector3.UP * 46.0)
@@ -183,6 +219,9 @@ func tick(delta: float, action: AbilityAction) -> void:
 		update_target(player.get_viewport().get_mouse_position())
 		return
 	var vfx: GiantSwordVFX = player.combat.giant_sword_vfx
+	if _coronation_active:
+		_tick_coronation(delta, action)
+		return
 	if action.current_phase == AbilityAction.Phase.STARTUP:
 		var progress: float = clampf(1.0 - action.phase_timer / action.data.startup_duration, 0, 1)
 		var back: Vector3 = _shot_back
@@ -202,15 +241,18 @@ func tick(delta: float, action: AbilityAction) -> void:
 		_camera_goal = cinematic_camera.global_transform
 	elif action.current_phase == AbilityAction.Phase.RECOVERY:
 		vfx.update_recovery(action.phase_timer, action.data.recovery_duration)
-		# Ease back to the original gameplay camera only after seeing the impact.
+		# Hold the impact shot through the travelling front and settling dust.
 		var remaining: float = action.phase_timer
-		if remaining < 0.45 and is_instance_valid(_previous_camera):
+		for bar in _bars: bar.color.a = smoothstep(0.0, HANDOFF_SECONDS, remaining)
+		if remaining < HANDOFF_SECONDS and is_instance_valid(_previous_camera):
 			var previous: Vector3 = cinematic_camera.global_position
-			cinematic_camera.global_transform = _camera_goal.interpolate_with(_previous_camera.global_transform, smoothstep(0, 1, 1 - remaining / 0.45))
-			cinematic_camera.global_position = _safe_camera_motion(previous, cinematic_camera.global_position, lerpf(CAMERA_CLEARANCE, 0.12, smoothstep(0, 1, 1 - remaining / 0.45)))
-			cinematic_camera.fov = lerpf(_shot_fov(68.0), _previous_camera.fov, smoothstep(0, 1, 1 - remaining / 0.45))
+			cinematic_camera.global_transform = _camera_goal.interpolate_with(_previous_camera.global_transform, smoothstep(0, 1, 1 - remaining / HANDOFF_SECONDS))
+			cinematic_camera.global_position = _safe_camera_motion(previous, cinematic_camera.global_position, lerpf(CAMERA_CLEARANCE, 0.12, smoothstep(0, 1, 1 - remaining / HANDOFF_SECONDS)))
+			cinematic_camera.fov = lerpf(_shot_fov(68.0), _previous_camera.fov, smoothstep(0, 1, 1 - remaining / HANDOFF_SECONDS))
 		else:
 			cinematic_camera.global_transform = _camera_goal
+			cinematic_camera.look_at(target_position + Vector3.UP * lerpf(9.0, 6.5, smoothstep(.3, 1.8, vfx._impact_elapsed)))
+			_camera_goal = cinematic_camera.global_transform
 	vfx.update_impact(delta)
 	if _shake_timer > 0:
 		_shake_timer = maxf(0, _shake_timer - delta)
@@ -221,6 +263,13 @@ func tick(delta: float, action: AbilityAction) -> void:
 	else:
 		cinematic_camera.h_offset = 0
 		cinematic_camera.v_offset = 0
+	if vfx._impact_elapsed >= 0:
+		var distance: float = Vector2(cinematic_camera.global_position.x - target_position.x, cinematic_camera.global_position.z - target_position.z).length()
+		var arrival: float = vfx.wind_arrival_time(distance)
+		var pulse: float = exp(-pow((vfx._impact_elapsed - arrival) / .16, 2.0)) * .22
+		cinematic_camera.h_offset += sin(vfx._impact_elapsed * 39.0) * pulse
+		cinematic_camera.v_offset += cos(vfx._impact_elapsed * 31.0) * pulse * .65
+
 
 
 func impact() -> void:
@@ -235,6 +284,9 @@ func stop() -> void:
 	if not _presentation_active:
 		return
 	_presentation_active = false
+	_coronation_active = false
+	_coronation.stop()
+	_restore_coronation_columns()
 	_frozen = false
 	if _cinematic:
 		_cinematic.end(self)
@@ -244,23 +296,29 @@ func stop() -> void:
 	cinematic_camera.h_offset = 0
 	cinematic_camera.v_offset = 0
 	_shake_timer = 0
-	cinematic_camera.clear_current(false)
-	if is_instance_valid(_previous_camera):
-		_previous_camera.make_current()
+	if not _victory_camera_held:
+		cinematic_camera.clear_current(false)
+		if is_instance_valid(_previous_camera): _previous_camera.make_current()
 	player._update_head_visibility()
-	player._is_mouse_captured = _previous_capture
-	Input.mouse_mode = _previous_mouse_mode
+	player._is_mouse_captured = false if _victory_camera_held else _previous_capture
+	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE if _victory_camera_held else _previous_mouse_mode
 	if player.combat and player.combat.giant_sword_vfx:
 		player.combat.giant_sword_vfx.stop()
 
 
 func _exit_tree() -> void:
+	_restore_coronation_columns()
+	release_victory_camera()
 	if is_instance_valid(_cinematic):
 		_cinematic.end(self)
 	# Scene changes must not leave the cursor in targeting mode.
 	if _presentation_active:
 		Input.mouse_mode = _previous_mouse_mode
 		_presentation_active = false
+
+
+func cinematic_timeout_seconds() -> float:
+	return 14.0 if _coronation_active else 12.0
 
 func _physics_process(delta: float) -> void:
 	if not _frozen or not _cinematic.owns(self) or not get_tree().paused:
@@ -270,6 +328,14 @@ func _physics_process(delta: float) -> void:
 		stop()
 		return
 	var real_delta: float = delta / maxf(Engine.time_scale, 0.001)
+	if _coronation_active:
+		# Advance presentation before the action: its sword contact and damage occur together.
+		_tick_coronation(real_delta, action)
+		var previous_phase: int = action.current_phase
+		action.update(real_delta)
+		if player.active_ability_action == action and action.is_active() and previous_phase != AbilityAction.Phase.RECOVERY and action.current_phase == AbilityAction.Phase.RECOVERY:
+			action.phase_timer = maxf(.001, _coronation.DURATION - _coronation.elapsed)
+		return
 	player.combat.giant_sword_vfx.update_cloud_hold(real_delta)
 	# Presentation-only reveal; the action clock and all other actors remain frozen.
 	if _cloud_reveal_remaining > 0:
@@ -363,3 +429,128 @@ func _safe_camera_motion(start: Vector3, desired: Vector3, radius: float) -> Vec
 		var vertical: PackedFloat32Array = player.get_world_3d().direct_space_state.cast_motion(_camera_query)
 		safe += _camera_query.motion * vertical[0]
 	return safe if _point_clear(safe, radius) else start
+
+
+func finish_presentation_timeout_seconds() -> float:
+	return 12.0 if _coronation_active else 8.0
+
+
+func _is_coronation_column(node: Node) -> bool:
+	while is_instance_valid(node):
+		if node.name == "GreekArenaRuins": return true
+		node = node.get_parent()
+	return false
+
+
+func _coronation_view_clear(point: Vector3) -> bool:
+	for offset: Vector3 in [Vector3(0,3,0), Vector3(-5,4,0), Vector3(5,4,0), Vector3(0,14,0), Vector3(0,28,0)]:
+		_camera_ray.from = point; _camera_ray.to = target_position + offset
+		var hit: Dictionary = player.get_world_3d().direct_space_state.intersect_ray(_camera_ray)
+		# Decorative columns are excluded from this camera's render layer.
+		if not hit.is_empty() and not _is_coronation_column(hit.collider): return false
+	return true
+
+
+func _coronation_arc_clear(back: Vector3, scale: float, height: float, turn: float) -> bool:
+	var previous: Vector3 = target_position + back * 22.0 * scale + Vector3.UP * height
+	for sample in 25:
+		var at: Vector3 = target_position + back.rotated(Vector3.UP, turn * sample / 24.0) * 22.0 * scale + Vector3.UP * height
+		if not _point_clear(at, CAMERA_CLEARANCE + .15) or not _coronation_view_clear(at): return false
+		_camera_query.transform.origin = previous; _camera_query.motion = at - previous
+		if _camera_query.motion.length_squared() > .00001:
+			var sweep: PackedFloat32Array = player.get_world_3d().direct_space_state.cast_motion(_camera_query)
+			if sweep[0] < 1.0: return false
+		previous = at
+	return true
+
+
+func _select_coronation_shot() -> void:
+	var preferred: Vector3 = Basis(Vector3.UP, player._camera_yaw).z.rotated(Vector3.UP, -.4)
+	for scale: float in [1.0, .85, .70, .55, .4]:
+		for height: float in [5.0, 8.0, 11.0]:
+			for angle: float in [0.0, PI/4, -PI/4, PI/2, -PI/2, 3*PI/4, -3*PI/4, PI]:
+				var back: Vector3 = preferred.rotated(Vector3.UP, angle)
+				for turn: float in [.56, -.56]:
+					if not _coronation_arc_clear(back, scale, height, turn): continue
+					_shot_back = back; _shot_distance_scale = scale
+					_coronation_shot_height = height; _coronation_orbit_angle = turn
+					_coronation_path_ready = true
+					return
+	# A cramped custom arena can retain the already validated stationary shot.
+	_coronation_orbit_angle = 0.0
+	_coronation_shot_height = lerpf(12, 5, smoothstep(.25, .65, _shot_distance_scale))
+	_coronation_path_ready = false
+
+
+func _exclude_coronation_columns() -> void:
+	for visual: MeshInstance3D in get_tree().root.find_children("*", "MeshInstance3D", true, false):
+		if not _is_coronation_column(visual): continue
+		_column_visual_layers[visual] = visual.layers
+		visual.layers = CORONATION_COLUMN_LAYER
+	cinematic_camera.cull_mask &= ~CORONATION_COLUMN_LAYER
+
+
+func _restore_coronation_columns() -> void:
+	for visual in _column_visual_layers:
+		if is_instance_valid(visual): visual.layers = _column_visual_layers[visual]
+	_column_visual_layers.clear()
+	if is_instance_valid(cinematic_camera): cinematic_camera.cull_mask |= CORONATION_COLUMN_LAYER
+
+
+func _tick_coronation(delta: float, _action: AbilityAction) -> void:
+	var victory_sequence: bool = _action.custom_data.get("ultimate_kill_confirmed", false) and not finisher_frame_ready.get_connections().is_empty()
+	_coronation.hold_revelation = victory_sequence
+	_coronation.advance(delta)
+	var t: float = _coronation.elapsed
+	# Ease into a slow 32-degree orbit, then settle before showing Victory.
+	var orbit_progress: float = clampf((t - 5.8) / 3.0, 0.0, 1.0)
+	# Quintic easing has zero velocity and acceleration at both ends.
+	var eased: float = orbit_progress * orbit_progress * orbit_progress * (orbit_progress * (orbit_progress * 6.0 - 15.0) + 10.0)
+	var orbit: float = eased * _coronation_orbit_angle if victory_sequence else smoothstep(5.5, 8.4, t) * _coronation_orbit_angle * .32
+	var back: Vector3 = _shot_back.rotated(Vector3.UP, orbit)
+	var shot_height: float = _coronation_shot_height
+	var desired: Vector3 = target_position + back * 22.0 * _shot_distance_scale + Vector3.UP * shot_height
+	if t < .7: desired = _coronation_entry.origin.lerp(desired, smoothstep(0.0, .7, t))
+	var previous: Vector3 = cinematic_camera.global_position
+	cinematic_camera.global_position = desired if _coronation_path_ready else _safe_camera_motion(previous, desired, CAMERA_CLEARANCE)
+	var focus: float = 14.0
+	if t < _coronation.ROCK_HIT: focus = maxf(14.0, _coronation.rock.position.y + 4.0)
+	elif t >= _coronation.SWORD_DROP and t < _coronation.SWORD_HIT: focus = maxf(14.0, player.combat.giant_sword_vfx.sword.position.y + 8.0)
+	cinematic_camera.look_at(target_position + Vector3.UP * focus)
+	cinematic_camera.fov = _shot_fov(74.0)
+	var impact: float = exp(-pow((t - _coronation.ROCK_HIT) / .15, 2.0)) * .55 + exp(-pow((t - _coronation.SWORD_HIT) / .12, 2.0)) * .45
+	cinematic_camera.h_offset = sin(t * 79) * impact
+	cinematic_camera.v_offset = cos(t * 67) * impact * .7
+	# Save the fully revealed tableau before the camera and light fade back to gameplay.
+	if not _finisher_frame_requested and t >= _coronation.DURATION - .3 and victory_sequence:
+		_finisher_frame_requested = true
+		_capture_finisher_frame(_action)
+	var remaining: float = maxf(0.0, _coronation.DURATION - t)
+	for bar in _bars: bar.color.a = 1.0 if victory_sequence else smoothstep(0.0, HANDOFF_SECONDS, remaining)
+	if not victory_sequence and remaining < HANDOFF_SECONDS and is_instance_valid(_previous_camera):
+		var blend: float = smoothstep(0.0, HANDOFF_SECONDS, HANDOFF_SECONDS - remaining)
+		var shot: Transform3D = cinematic_camera.global_transform
+		cinematic_camera.global_transform = shot.interpolate_with(_previous_camera.global_transform, blend)
+		cinematic_camera.global_position = _safe_camera_motion(previous, cinematic_camera.global_position, lerpf(CAMERA_CLEARANCE, .12, blend))
+		cinematic_camera.fov = lerpf(_shot_fov(74.0), _previous_camera.fov, blend)
+
+
+func _capture_finisher_frame(action: AbilityAction) -> void:
+	if DisplayServer.get_name() == "headless": return
+	await RenderingServer.frame_post_draw
+	if not is_inside_tree() or not _coronation_active or player.active_ability_action != action or not action.is_active(): return
+	var picture: Image = player.get_viewport().get_texture().get_image()
+	if picture and not picture.is_empty():
+		finisher_frame_ready.emit(ImageTexture.create_from_image(picture))
+
+
+func hold_victory_camera() -> void:
+	if _coronation_active and _presentation_active:
+		_victory_camera_held = true
+
+
+func release_victory_camera() -> void:
+	if not _victory_camera_held: return
+	_victory_camera_held = false
+	if is_instance_valid(cinematic_camera) and cinematic_camera.is_inside_tree(): cinematic_camera.clear_current(false)
+	if is_instance_valid(_previous_camera) and _previous_camera.is_inside_tree(): _previous_camera.make_current()

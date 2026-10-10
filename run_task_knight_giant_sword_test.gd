@@ -7,7 +7,7 @@ var player: PlayerController
 var targets: Array[TrainingDummy] = []
 var hits: int = 0
 var feedbacks: int = 0
-var budget: int = 2600
+var budget: int = 3400
 
 
 func _initialize() -> void:
@@ -176,11 +176,11 @@ func _run() -> void:
 		return
 	_assert(targets[0].current_hp == 10 and targets[1].current_hp == 10 and targets[2].current_hp == 10, "V hits front/rear/near-edge targets for 90")
 	_assert(targets[3].current_hp == 100 and targets[4].current_hp == 100 and targets[5].current_hp == 100, "Wall, range and vertical separation reject targets")
-	_assert(hits == 3 and feedbacks == 1 and is_equal_approx(player.combat.giant_sword_vfx.sword.position.y, -0.4), "One impact/audio occurs exactly when sword lands")
+	_assert(hits == 3 and feedbacks == 1 and player.combat.giant_sword_vfx.sword.position.y <= -GiantSwordVFX.INITIAL_EMBED_DEPTH, "One impact/audio occurs exactly when sword bites into the floor")
 	_assert(not player.combat.whirling_blade_vfx.visible, "V does not trigger C spin effect")
 	player.combat.execute_radial_ability_impact(data, player.active_ability_action)
 	_assert(hits == 3 and feedbacks == 1, "Retry cannot duplicate damage or ultimate feedback")
-	await _step(145)
+	await _step(310)
 	_input("move_forward", false)
 	_input("ultimate", false)
 	_assert(player.active_ability_action == null and player.anim_player.current_animation != "Knight_V_GiantSword" and not player.combat.giant_sword_vfx.visible, "Recovery releases action, animation and effects")
@@ -261,9 +261,9 @@ func _run() -> void:
 		return
 	_assert(targets[0].current_hp == 100 and targets[1].current_hp == 10, "Remote AOE is centered on clicked location")
 	_assert(player.giant_sword_ultimate._shake_timer > 0 and player.combat.giant_sword_vfx.shockwave.visible and player.combat.giant_sword_vfx._debris_batch.visible_instance_count == 32, "Impact triggers camera shake, shockwave and batched debris")
-	await _step(70)
+	await _step(240)
 	_assert(float(player.combat.giant_sword_vfx._sword_materials[0].get_shader_parameter("dissolve")) > 0, "Solid sword dissolves only after impact")
-	await _step(75)
+	await _step(70)
 	_assert(player.camera.current and not player.combat.giant_sword_vfx.visible, "Natural completion restores gameplay camera and hides effects")
 	print("RESULTS: %d / %d PASSED (%d FAILED)" % [passed, passed + failed, failed])
 	quit(1 if failed > 0 else 0)

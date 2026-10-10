@@ -1,7 +1,6 @@
 extends Node3D
 ## One reusable local bank of common effects, warmed at ready. These instances
 ## keep running inside the ultimate's paused world without waking other VFX.
-const Heavy=preload("res://vfx/common/HeavyDust.tscn")
 const Puff=preload("res://vfx/common/DustPuff.tscn")
 const Ring=preload("res://vfx/common/DustRing.tscn")
 const Debris=preload("res://vfx/common/Debris.tscn")
@@ -16,7 +15,7 @@ var _warmed: bool=false
 func _ready() -> void:
  process_mode=Node.PROCESS_MODE_ALWAYS
  manager=get_node_or_null("/root/VFXManager")
- for scene in [Heavy,Heavy,Heavy,Heavy,Heavy,Heavy,Heavy,Heavy,Puff,Puff,Puff,Puff,Ring,Debris,Debris,Sparks,Sparks]:
+ for scene in [Puff,Puff,Puff,Puff,Puff,Puff,Puff,Puff,Puff,Puff,Puff,Puff,Ring,Debris,Debris,Sparks,Sparks]:
   var effect: Node3D=scene.instantiate();add_child(effect);effects.append(effect);effect.process_mode=Node.PROCESS_MODE_ALWAYS
  query=PhysicsRayQueryParameters3D.new();query.collision_mask=1
  call_deferred("warmup")
@@ -65,12 +64,12 @@ func impact(origin: Vector3,radius: float) -> void:
   var at: Vector3=origin;at.y=ground_y
   var params: Dictionary={"color":ground_color,"ground_y":ground_y}
   if i<8:
-   var angle: float=TAU*i/8.0;var outward: Vector3=Vector3(cos(angle),.3,sin(angle)).normalized()
+   var angle: float=TAU*i/8.0;var outward: Vector3=Vector3(cos(angle),.15,sin(angle)).normalized()
    at+=Vector3(cos(angle),0,sin(angle))*radius*.35
-   params.merge({"scale":1.9,"amount_scale":.85,"particle_lifetime":1.45,"direction":outward,"spread":28.0,"speed_min":3.6,"speed_max":6.8})
+   params.merge({"scale":1.8,"amount_scale":.85,"particle_lifetime":1.5,"direction":outward,"spread":16.0,"speed_min":16.0,"speed_max":24.0})
   elif i<12:
    var angle: float=TAU*(i-8)/4;at+=Vector3(cos(angle),0,sin(angle))*.7
-   params.merge({"scale":2.5,"amount_scale":.6,"particle_lifetime":1.2,"direction":Vector3.UP,"speed_min":1.5,"speed_max":3.0})
+   params.merge({"scale":3.0,"amount_scale":.6,"particle_lifetime":1.6,"direction":Vector3.UP,"speed_min":3.0,"speed_max":5.5})
   elif i==12:params.merge({"radius":radius*1.8,"amount_scale":1.0,"particle_lifetime":1.35})
   elif i<15:params.merge({"scale":1.5,"amount_scale":1.0,"particle_lifetime":1.8,"speed_min":3.5,"speed_max":7.5})
   else:

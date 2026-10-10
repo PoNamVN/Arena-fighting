@@ -86,7 +86,7 @@ static func create_giant_sword_ultimate() -> AbilityData:
 	a.is_dodgeable = true
 	a.startup_duration = 1.40
 	a.active_duration = 0.20
-	a.recovery_duration = 2.0
+	a.recovery_duration = 4.8
 	a.allows_movement = false
 	a.movement_speed = 0.0
 	a.has_front_protection = false

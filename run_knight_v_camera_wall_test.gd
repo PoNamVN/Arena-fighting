@@ -47,9 +47,9 @@ func run()->void:
    check(los,"Ground impact remains visible target=%s yaw=%.2f"%[target,yaw])
    action.current_phase=AbilityAction.Phase.RECOVERY
    var return_safe:bool=true
-   for frame in 27:
-    action.phase_timer=.45-(frame+1)/60.0;ult.tick(0,action)
-    var radius:float=lerpf(1.0,.12,smoothstep(0,1,1-action.phase_timer/.45))
+   for frame in roundi(GiantSwordUltimate.HANDOFF_SECONDS*60):
+    action.phase_timer=GiantSwordUltimate.HANDOFF_SECONDS-(frame+1)/60.0;ult.tick(0,action)
+    var radius:float=lerpf(1.0,.12,smoothstep(0,1,1-action.phase_timer/GiantSwordUltimate.HANDOFF_SECONDS))
     return_safe=return_safe and clear_at(ult.cinematic_camera.global_position,radius)
    check(return_safe,"Return to gameplay avoids walls target=%s yaw=%.2f"%[target,yaw])
    action.cancel()

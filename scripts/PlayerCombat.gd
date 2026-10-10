@@ -92,24 +92,9 @@ func _physics_process(delta: float) -> void:
 		_cooldown_timer -= delta
 
 
-func execute_radial_ability_impact(ability: AbilityData, action: AbilityAction) -> void:
-	if not player or not ability or not action or action.current_phase != AbilityAction.Phase.ACTIVE or not action.is_active():
-		return
-	var impact_origin: Vector3 = action.custom_data.get("impact_origin", player.global_position)
+func radial_ability_targets(ability: AbilityData, impact_origin: Vector3) -> Array[Node3D]:
+	var targets: Array[Node3D] = []
 	var origin: Vector3 = impact_origin + Vector3(0.0, 0.9, 0.0)
-	# Presentation and audio fire once, even if the hit dispatch is retried.
-	if not action.custom_data.get("radial_feedback", false):
-		action.custom_data["radial_feedback"] = true
-		if ability.id == "giant_sword_ultimate":
-			if giant_sword_vfx:
-				giant_sword_vfx.impact()
-			if combat_feedback:
-				combat_feedback.trigger_ultimate_feedback()
-		else:
-			if whirling_blade_vfx:
-				whirling_blade_vfx.trigger(impact_origin, ability.range, ability.active_duration)
-			if combat_feedback:
-				combat_feedback.trigger_skill_feedback(ability.id)
 	var space: PhysicsDirectSpaceState3D = get_world_3d().direct_space_state
 	var shape: SphereShape3D = SphereShape3D.new()
 	shape.radius = ability.range
@@ -120,7 +105,7 @@ func execute_radial_ability_impact(ability: AbilityData, action: AbilityAction) 
 	query.exclude = [player.get_rid()]
 	for hit: Dictionary in space.intersect_shape(query, 16):
 		var target: Node3D = hit.get("collider") as Node3D
-		if not target or target == player or not target.has_method("take_damage") or not action.can_hit_target(target):
+		if not target or target == player or not target.has_method("take_damage") or targets.has(target):
 			continue
 		var target_health: HealthComponent = target.get_node_or_null("HealthComponent") as HealthComponent
 		if target_health and target_health.is_dead():
@@ -133,6 +118,52 @@ func execute_radial_ability_impact(ability: AbilityData, action: AbilityAction) 
 		ray.exclude = [player.get_rid(), (target as CollisionObject3D).get_rid()]
 		if not space.intersect_ray(ray).is_empty():
 			continue
+		targets.append(target)
+	return targets
+
+
+func radial_ability_can_finish(ability: AbilityData, impact_origin: Vector3) -> bool:
+	# Use the same range, height, collision mask and wall checks as the actual hit.
+	for target in radial_ability_targets(ability, impact_origin):
+		var health: HealthComponent = target.get_node_or_null("HealthComponent") as HealthComponent
+		if not health or health.is_dead() or health.ability_invulnerable or health.training_invulnerable:
+			continue
+		var damage: float = ability.damage
+		if target is PlayerController:
+			var receiver: PlayerController = target as PlayerController
+			if receiver.is_ragdoll_recovering() or (ability.is_dodgeable and receiver.is_in_dodge_iframe()): continue
+			if receiver.wizard_combat and receiver.wizard_combat.storm.channeling(): continue
+			var front: bool = is_attack_inside_block_cone(receiver, impact_origin, receiver.block_cone_deg)
+			if receiver.active_ability_action and receiver.active_ability_action.has_front_protection() and front: continue
+			if receiver.combat_state == PlayerController.CombatState.BLOCK and not receiver.is_shield_broken and front:
+				damage *= 1.0 - receiver.block_damage_reduction
+		elif "is_blocking" in target and target.get("is_blocking") and not target.get("is_shield_broken"):
+			if is_attack_inside_block_cone(target, impact_origin, target.get("block_cone_deg")):
+				damage *= 1.0 - float(target.get("block_damage_reduction"))
+		if damage > 0.0 and health.current_health <= damage:
+			return true
+	return false
+
+
+func execute_radial_ability_impact(ability: AbilityData, action: AbilityAction) -> void:
+	if not player or not ability or not action or action.current_phase != AbilityAction.Phase.ACTIVE or not action.is_active():
+		return
+	var impact_origin: Vector3 = action.custom_data.get("impact_origin", player.global_position)
+	var origin: Vector3 = impact_origin + Vector3(0.0, 0.9, 0.0)
+	# The finisher owns its rock/sword impacts; do not overlay the normal V effect.
+	if not action.custom_data.get("radial_feedback", false):
+		action.custom_data["radial_feedback"] = true
+		if ability.id == "giant_sword_ultimate":
+			if giant_sword_vfx and not action.custom_data.get("ultimate_finisher", false):
+				giant_sword_vfx.impact()
+			if combat_feedback: combat_feedback.trigger_ultimate_feedback()
+		else:
+			if whirling_blade_vfx: whirling_blade_vfx.trigger(impact_origin, ability.range, ability.active_duration)
+			if combat_feedback: combat_feedback.trigger_skill_feedback(ability.id)
+	for target in radial_ability_targets(ability, impact_origin):
+		if not action.can_hit_target(target): continue
+		var target_health: HealthComponent = target.get_node_or_null("HealthComponent") as HealthComponent
+		var target_pos: Vector3 = target.global_position + Vector3(0.0, 0.9, 0.0)
 		action.register_hit(target)
 		var blocked: bool = false
 		if "is_blocking" in target and target.get("is_blocking") and not target.get("is_shield_broken"):
@@ -153,6 +184,8 @@ func execute_radial_ability_impact(ability: AbilityData, action: AbilityAction) 
 				target.call("take_damage", damage, impact_origin)
 			if blocked and target.has_method("apply_shield_damage"):
 				target.call("apply_shield_damage", normal_attack_shield_damage)
+		if ability.id == "giant_sword_ultimate" and hp_before > 0.0 and is_instance_valid(target_health) and target_health.is_dead():
+			action.custom_data["ultimate_kill_confirmed"] = true
 		if not is_instance_valid(target):
 			continue
 		var actual_damage: float = hp_before - target_health.current_health if target_health else damage
