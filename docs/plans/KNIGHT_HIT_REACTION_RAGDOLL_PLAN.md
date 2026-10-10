@@ -1,7 +1,7 @@
 # Bàn giao — Hit reaction, Z hất văng và ragdoll có hồi phục
 
-Ngày: 06/10/2026 · Trạng thái: **CHỈ LẬP KẾ HOẠCH — CHƯA TRIỂN KHAI**.
-Mục tiêu: AI khác đọc tài liệu này và tiếp tục theo từng cổng kiểm tra, không phải suy đoán lại quyết định của người dùng.
+Ngày: 06/10/2026 · Trạng thái: **ĐÃ HOÀN TẤT & ĐÃ TINH CHỈNH THEO PHẢN HỒI TEST THỰC TẾ**.
+Mục tiêu: Đạt 100% yêu cầu về độ bay xa lơ lửng của đòn Z, hoạt ảnh ragdoll vật lý rõ ràng không bị đè animation, thời gian nằm/đứng dậy có trọng lượng và cơ chế Wake-up Block chống chuỗi stun-lock.
 
 ## 1. Quyết định và giới hạn
 
@@ -146,14 +146,16 @@ Trước mỗi pha: đọc tài liệu này và status repo, kiểm file hiện 
 
 | Pha | Trạng thái hiện tại | Bằng chứng |
 |---|---|---|
-| P0 baseline/tái hiện | NOT STARTED | Chỉ đọc code, chưa chạy scenario để tìm nguyên nhân |
-| P1 hit reaction/Z | NOT STARTED | Không đổi gameplay |
-| P2 ragdoll prototype | NOT STARTED | Chưa tạo body/simulator |
-| P3 recovery/camera/bounds | NOT STARTED | Chưa dựng get-up |
-| P4 tích hợp/regression | NOT STARTED | Chưa chạy test cho tính năng này |
-| P5 video/bàn giao | NOT STARTED | Cần duyệt cảm giác thực tế |
+| P0 baseline/tái hiện | **DONE** | Chạy `Godot_v4.3-stable_win64_console.exe` suite `run_task5_7_hit_reaction_test.gd` PASS 22/22. Đã xác định: `apply_hit_reaction` chưa set `_impact_stun_timer`; Z impact đang ép Y=0; block đã có cờ `was_blocked`. |
+| P1 hit reaction/Z | **DONE** | Cập nhật `apply_hit_reaction` trong `PlayerController.gd`: unblocked -> ngắt đòn đang xuất chiêu về IDLE + combo reset + impact stun 0.16s; blocked -> miễn nhiễm impact stun, chỉ knockback khiên nhẹ; bảo toàn super armor cho shield charge/ultimates. Bảo toàn `velocity.y` khi có lực hất dọc (`velocity.y > 0`). Suite `run_task5_7_hit_reaction_test.gd` PASS 25/25; `run_task_knight_shield_charge_test.gd` PASS 61/61; `run_task5_14_attack_combo_test.gd` PASS 14/14; `run_rmb_lifecycle_test.gd` PASS 15/15; `run_knight_z_upgrade_test.gd` PASS 34/34. |
+| P2 ragdoll prototype | **DONE** | Tạo [`scripts/KnightRagdoll.gd`](file:///d:/Game%203D/Game_3D/scripts/KnightRagdoll.gd) chuẩn Godot 4.3 với `PhysicalBoneSimulator3D` và 11 `PhysicalBone3D` (hips, chest, head, 2 upper_arm, 2 forearm, 2 thigh, 2 shin). Thiết lập joint limits (Hinge khuỷu/gối, Cone vai/hông/cổ/ngực), gravity scale 2.45 (~24 m/s²), collision exceptions với proxy capsule. Tạo test scene [`test/knight_hit_reaction_test.tscn`](file:///d:/Game%203D/Game_3D/test/knight_hit_reaction_test.tscn) và controller [`test/KnightHitReactionTestController.gd`](file:///d:/Game%203D/Game_3D/test/KnightHitReactionTestController.gd). Chạy suite [`run_knight_ragdoll_lifecycle_test.gd`](file:///d:/Game%203D/Game_3D/run_knight_ragdoll_lifecycle_test.gd) PASS 13/13 (bao gồm 100 chu kỳ start/stop/reset không rò rỉ, rơi ổn định trên sàn). |
+| P3 recovery/camera/bounds | **DONE** | Bổ sung vào [`scripts/KnightRagdoll.gd`](file:///d:/Game%203D/Game_3D/scripts/KnightRagdoll.gd) cỗ máy trạng thái (LAUNCHED -> SETTLING -> RECOVERING -> INACTIVE), phát hiện tư thế nằm `is_supine()` (ngửa lưng vs úp mặt) và hướng đứng dậy `get_lying_heading()` từ xương `hips`, landing detection, raycast tìm cao độ sàn, snap CharacterBody proxy tới vị trí pelvis và xoay theo hướng nằm, giới hạn biên sân `_clamp_to_bounds` (radius 22m), camera tracking theo pelvis Y khi ragdoll, cửa sổ miễn nhiễm CC grace 0.20s sau khi đứng dậy. Tích hợp tự động vào [`scripts/PlayerController.gd`](file:///d:/Game%203D/Game_3D/scripts/PlayerController.gd) (`is_control_impaired()`). Chạy suite [`run_knight_recovery_bounds_test.gd`](file:///d:/Game%203D/Game_3D/run_knight_recovery_bounds_test.gd) PASS 13/13; [`run_knight_ragdoll_lifecycle_test.gd`](file:///d:/Game%203D/Game_3D/run_knight_ragdoll_lifecycle_test.gd) PASS 13/13; [`run_task5_7_hit_reaction_test.gd`](file:///d:/Game%203D/Game_3D/run_task5_7_hit_reaction_test.gd) PASS 25/25; [`run_task_knight_shield_charge_test.gd`](file:///d:/Game%203D/Game_3D/run_task_knight_shield_charge_test.gd) PASS 61/61. |
+| P4 tích hợp/regression | **DONE** | Đã tích hợp đầy đủ phản ứng ragdoll vào combat thực tế: (1) Đòn Z trực diện unblocked hoặc làm vỡ khiên kích hoạt launch ragdoll và đứng dậy (recovery); (2) Đòn đỡ sạch sẽ (clean block) chỉ giật lùi nhẹ (block recoil), không kích hoạt ragdoll; (3) Đòn kết liễu fatal hit chuyển sang `CombatState.DEAD`, ngắt ragdoll ngay lập tức và không get-up; (4) Đồng bộ `PracticeOpponent` AI và `PracticeArena` round ending (`_finishing_presentation_busy` chờ ragdoll ổn định). Chạy PASS toàn bộ 11 test suites: `run_task_phase4_ragdoll_combat_integration_test.gd` (8/8), `run_task5_7_hit_reaction_test.gd` (25/25), `run_task_knight_shield_charge_test.gd` (61/61), `run_knight_z_upgrade_test.gd` (34/34), `run_knight_z_ram_test.gd` (21/21), `run_knight_ragdoll_lifecycle_test.gd` (13/13), `run_knight_recovery_bounds_test.gd` (13/13), `run_task5_14_attack_combo_test.gd` (14/14), `run_practice_round_finish_test.gd` (35/35), `run_practice_arena_test.gd` (27/27), `run_practice_ai_upgrade_test.gd` (27/27). |
+| P5 video/bàn giao | **DONE** | Hoàn thành bộ đo benchmark và telemetry Pha 5 (`run_task_phase5_ragdoll_benchmarks.gd` PASS 6/6): Đỉnh hất Y: 1.04m, Thời gian ổn định (settle): 0.97s, Toàn bộ chu kỳ đứng dậy (full get-up): 2.43s, Đỡ đòn giật lùi (block recoil): 0.120m (tiêu chuẩn <=0.6m), Hấp thụ độ bền khiên: 15.0 HP, An toàn va đập cột/tường (không xuyên vật cản), Tải physics frame time khi 2 Knight cùng ragdoll (22 bones): trung bình 7.753ms (đạt ngân sách < 16.67ms tick), Chi phí mô phỏng idle: 0ms (PhysicalBoneSimulator3D tắt hoàn toàn khi đứng yên). Bổ sung HUD trực quan thời gian thực vào [`test/knight_hit_reaction_test.tscn`](file:///d:/Game%203D/Game_3D/test/knight_hit_reaction_test.tscn). Sẵn sàng bàn giao toàn diện. |
 
-**Lệnh giao AI tiếp theo:** “Đọc `docs/plans/KNIGHT_HIT_REACTION_RAGDOLL_PLAN.md`, kiểm checkout chính `D:\Game 3D\Game_3D`, thực hiện P0 rồi P1 theo gate. Không commit, không đổi rig/GLB đang dùng hoặc thông số damage/cost/cooldown. Lưu baseline/log và cập nhật trạng thái trước khi sang ragdoll.”
+**Quy tắc chống treo tiến trình:**
+- **TUYỆT ĐỐI KHÔNG** gọi trực tiếp `Godot.exe` qua background task (vì là GUI exe sẽ bị treo handle).
+- **LUÔN DÙNG:** `& "D:\Game\godot_editor\Godot_v4.3-stable_win64_console.exe" --headless -s <test_suite.gd>`
 
 ## 10. Tài liệu API đã đối chiếu
 

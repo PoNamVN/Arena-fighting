@@ -77,22 +77,22 @@ func _ready() -> void:
 	_dust = CPUParticles3D.new()
 	_dust.emitting = false
 	_dust.one_shot = true
-	_dust.amount = 30
-	_dust.lifetime = 0.8
-	_dust.explosiveness = 0.8
+	_dust.amount = 55
+	_dust.lifetime = 1.0
+	_dust.explosiveness = 0.92
 	_dust.direction = Vector3.UP
-	_dust.spread = 80
-	_dust.initial_velocity_min = 1.0
-	_dust.initial_velocity_max = 4.0
-	_dust.gravity = Vector3(0,-6,0)
-	_dust.scale_amount_min = 0.12
-	_dust.scale_amount_max = 0.35
+	_dust.spread = 85.0
+	_dust.initial_velocity_min = 2.0
+	_dust.initial_velocity_max = 6.5
+	_dust.gravity = Vector3(0, -8, 0)
+	_dust.scale_amount_min = 0.18
+	_dust.scale_amount_max = 0.55
 	var mesh: SphereMesh = SphereMesh.new()
 	mesh.radial_segments = 6
 	mesh.rings = 3
 	_dust.mesh = mesh
 	var material: StandardMaterial3D = StandardMaterial3D.new()
-	material.albedo_color = Color(0.58,0.5,0.3)
+	material.albedo_color = Color(0.62, 0.48, 0.25)
 	_dust.material_override = material
 	actor.add_child(_dust)
 	_dust.top_level = true
@@ -274,6 +274,7 @@ func _spawn_trex() -> void:
 		actor.spectacle.burst(entry, Color(0.4, 1, 0.35), 4, 1.5)
 	_dust.global_position = entry
 	_dust.restart()
+	_trigger_quake_shockwave(entry)
 	_showcase_start = actor.get_viewport().get_camera_3d().global_transform
 	_showcase_elapsed = 0.0
 	_showcase = true
@@ -318,6 +319,7 @@ func _bite() -> void:
 	_crunch.play()
 	_dust.global_position = ground
 	_dust.restart()
+	_trigger_quake_shockwave(ground)
 	if not _target_alive(tagged):
 		return
 	var point: Vector3 = tagged.global_position+Vector3.UP*0.9
@@ -344,6 +346,8 @@ func _physics_process(delta: float) -> void:
 		stop()
 		return
 	elapsed += delta
+	if _ring and _ring.visible:
+		_ring.rotate_y(delta * 1.6)
 	if phase == Phase.AIM:
 		camera.global_transform = _camera_start.interpolate_with(_camera_goal,smoothstep(0,1,minf(1,elapsed/0.35)))
 		if not Input.is_action_pressed("attack"):
@@ -474,3 +478,28 @@ func stop() -> void:
 
 func _exit_tree() -> void:
 	_restore_camera()
+
+
+func _trigger_quake_shockwave(pos: Vector3) -> void:
+	var ring: MeshInstance3D = MeshInstance3D.new()
+	var torus: TorusMesh = TorusMesh.new()
+	torus.inner_radius = 0.6
+	torus.outer_radius = 1.3
+	torus.rings = 24
+	torus.ring_segments = 6
+	ring.mesh = torus
+	var mat: StandardMaterial3D = StandardMaterial3D.new()
+	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	mat.albedo_color = Color(1.0, 0.45, 0.12, 0.85)
+	ring.material_override = mat
+
+	get_tree().root.add_child(ring)
+	ring.global_position = pos + Vector3.UP * 0.1
+	ring.scale.y = 0.2
+
+	var tween: Tween = ring.create_tween()
+	tween.set_parallel(true)
+	tween.tween_property(ring, "scale", Vector3(5.5, 0.2, 5.5), 0.35).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+	tween.tween_property(mat, "albedo_color:a", 0.0, 0.35)
+	tween.chain().tween_callback(ring.queue_free)

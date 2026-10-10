@@ -1,0 +1,6 @@
+[gd_scene load_steps=2 format=2]
+
+[ext_resource type="PackedScene" path="res://scenes/Player.tscn" id=1]
+
+[node name="BaselineTest" type="Node3D"]
+child_node:0 = ExtResource( 1 )

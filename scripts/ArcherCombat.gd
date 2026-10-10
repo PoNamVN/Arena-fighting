@@ -1,14 +1,10 @@
 class_name ArcherCombat
 extends Node
 
-## Forest hunter: charged basic shot and a committed-direction rapid volley.
+## Forest hunter: charged bow shots, homing fish/hawk Z, seeking X and forest escape.
 const MAX_CHARGE: float = 1.2
 const RANGE: float = 24.0
 const RECOVERY: float = 0.40
-const VOLLEY_SHOTS: int = 6
-const VOLLEY_INTERVAL: float = 0.14
-const VOLLEY_STARTUP: float = 0.22
-const VOLLEY_RECOVERY: float = 0.35
 const COUNTER_RETREAT_DISTANCE: float = 3.2
 const COUNTER_RETREAT_DURATION: float = 0.32
 var seeking_active: bool = false
@@ -28,12 +24,7 @@ var counter_elapsed: float = 0.0
 var counters_fired: int = 0
 var _counter_target: Node3D
 var _retreat_direction: Vector3 = Vector3.BACK
-var volley_active: bool = false
-var volley_elapsed: float = 0.0
-var volley_shots_fired: int = 0
-var _volley_direction: Vector3 = Vector3.FORWARD
-var _volley_start_yaw: float = 0.0
-var _volley_yaw: float = 0.0
+var hawk_skill: ArcherHawkSkill
 const ARROW_SCENE: PackedScene = preload("res://assets/models/hunter_arrow.glb")
 const BOW_SCENE: PackedScene = preload("res://assets/models/hunter_bow.glb")
 var bait_ultimate: ArcherBaitUltimate
@@ -46,7 +37,14 @@ var shots_fired: int = 0
 var hits_landed: int = 0
 var _arrows: Array[Dictionary] = []
 var _bow: Node3D
+var _bow_attachment: BoneAttachment3D = null
+var _is_bow_aim_parented: bool = false
+const BOW_HAND_OFFSET: Vector3 = Vector3(0.02, 0.04, -0.01)
+const BOW_HAND_ROTATION: Vector3 = Vector3(-0.35, 0.05, 2.95)
 var _nocked_arrow: Node3D
+const ArcherVFXManagerScript = preload("res://scripts/ArcherVFXManager.gd")
+const ArcherCapePhysicsScript = preload("res://scripts/ArcherCapePhysics.gd")
+
 var _strings: Array[MeshInstance3D] = []
 var _label: Label
 var _bar: ProgressBar
@@ -55,6 +53,10 @@ var _release_sound: AudioStreamPlayer3D
 var _volley_trail_mesh: CylinderMesh
 var _counter_trail_material: StandardMaterial3D
 var _volley_trail_material: StandardMaterial3D
+var _basic_trail_material: StandardMaterial3D
+var _crit_trail_material: StandardMaterial3D
+var vfx_manager: Node = null
+var cape_physics: Node = null
 var _pose_bones: Dictionary = {}
 var _pose_rests: Dictionary = {}
 var _pose_hands: Dictionary = {}
@@ -77,14 +79,18 @@ func _ready() -> void:
 	actor.block_damage_reduction = 0.65
 	actor.shield_break_stun_duration = 0.65
 	actor.dodge_controller.perfect_dodge_registered.connect(_record_counter_attacker)
-	var volley: AbilityData = AbilityData.new()
-	volley.id = "archer_rapid_volley"
-	volley.display_name = "Loạt tên"
-	volley.stamina_cost = 25.0
-	volley.cooldown = 5.0
-	volley.damage = 7.0
-	volley.range = RANGE
-	actor.ability_system.equip_ability("skill_1", volley)
+	var hawk_data := AbilityData.new()
+	hawk_data.id = "archer_hawk_fish"
+	hawk_data.display_name = "Mồi cá — Diều hâu"
+	hawk_data.stamina_cost = 25
+	hawk_data.cooldown = 24
+	hawk_data.damage = 24
+	hawk_data.range = RANGE
+	actor.ability_system.equip_ability("skill_1", hawk_data)
+	hawk_skill = ArcherHawkSkill.new()
+	hawk_skill.actor = actor
+	hawk_skill.process_priority = 110
+	add_child(hawk_skill)
 	for spec: Array in [["skill_2", "archer_seeking_arrows", "Tên truy đuổi", 30.0, 8.0], ["skill_3", "archer_forest_escape", "Ẩn bước rừng", 25.0, 10.0]]:
 		var ability: AbilityData = AbilityData.new()
 		ability.id = spec[1]
@@ -118,9 +124,34 @@ func _ready() -> void:
 	_counter_trail_material.albedo_color = Color(1.0, 0.72, 0.16, 0.8)
 	_seeking_material = _volley_trail_material.duplicate() as StandardMaterial3D
 	_seeking_material.albedo_color = Color(0.25, 0.8, 1.0, 0.85)
+	_basic_trail_material = _volley_trail_material.duplicate() as StandardMaterial3D
+	_basic_trail_material.albedo_color = Color(0.25, 0.95, 0.55, 0.75)
+	_crit_trail_material = _volley_trail_material.duplicate() as StandardMaterial3D
+	_crit_trail_material.albedo_color = Color(1.0, 0.88, 0.22, 0.95)
+
+	vfx_manager = ArcherVFXManagerScript.new()
+	vfx_manager.name = "ArcherVFXManager"
+	add_child(vfx_manager)
+	vfx_manager.setup(self, actor)
+
+	cape_physics = ArcherCapePhysicsScript.new()
+	cape_physics.name = "ArcherCapePhysics"
+	add_child(cape_physics)
+	cape_physics.setup(actor)
+
 	_bow = BOW_SCENE.instantiate() as Node3D
 	_bow.name = "HunterBow"
-	actor.visuals.add_child(_bow)
+	_ensure_bow_attachment()
+	if _bow_attachment:
+		_bow_attachment.add_child(_bow)
+		_bow.position = BOW_HAND_OFFSET
+		_bow.rotation = BOW_HAND_ROTATION
+		_is_bow_aim_parented = false
+	else:
+		actor.visuals.add_child(_bow)
+		_bow.position = Vector3(0.3, 0.9, 0)
+		_bow.rotation = Vector3.ZERO
+		_is_bow_aim_parented = true
 	_nocked_arrow = ARROW_SCENE.instantiate() as Node3D
 	_bow.add_child(_nocked_arrow)
 	var material: StandardMaterial3D = StandardMaterial3D.new()
@@ -186,7 +217,7 @@ func handle_input(event: InputEvent) -> void:
 	if event.is_action_pressed("ultimate") and not event.is_echo():
 		bait_ultimate.begin()
 	elif event.is_action_pressed("skill_1") and not event.is_echo():
-		start_volley()
+		start_hawk()
 	elif event.is_action_pressed("skill_2") and not event.is_echo():
 		start_seeking()
 	elif event.is_action_pressed("skill_3") and not event.is_echo():
@@ -206,7 +237,7 @@ func handle_input(event: InputEvent) -> void:
 		actor._try_dodge()
 
 func start_charge() -> bool:
-	if bait_ultimate.input_busy() or charging or volley_active or seeking_active or dash_active or counter_active or actor.is_shield_broken or actor.is_shield_stunned or recovery_remaining > 0.0 or not actor.controls_enabled or actor.is_dead:
+	if bait_ultimate.input_busy() or charging or hawk_skill.casting or seeking_active or dash_active or actor.is_control_impaired() or counter_active or actor.is_shield_broken or actor.is_shield_stunned or recovery_remaining > 0.0 or not actor.controls_enabled or actor.is_dead:
 		return false
 	if actor.combat_state not in [PlayerController.CombatState.IDLE, PlayerController.CombatState.RUN] or actor._knockback_timer > 0.0:
 		return false
@@ -216,30 +247,11 @@ func start_charge() -> bool:
 	locked_target = _find_target()
 	return true
 
-func start_volley() -> bool:
-	if bait_ultimate.input_busy() or charging or volley_active or seeking_active or dash_active or counter_active or actor.is_shield_broken or actor.is_shield_stunned or recovery_remaining > 0.0 or not actor.controls_enabled or actor.is_dead:
-		return false
-	if actor.combat_state not in [PlayerController.CombatState.IDLE, PlayerController.CombatState.RUN] or actor._knockback_timer > 0.0:
-		return false
-	if not actor.ability_system.cast_ability("skill_1"):
-		return false
-	var target: Node3D = _find_target()
-	var origin: Vector3 = actor.global_position + Vector3(0, 1.35, 0)
-	_volley_direction = -actor.camera.global_basis.z if actor.camera else -actor.visuals.global_basis.z
-	if is_instance_valid(target):
-		_volley_direction = (target.global_position + Vector3(0, 0.9, 0) - origin).normalized()
-	_volley_start_yaw = atan2(-_volley_direction.x, -_volley_direction.z)
-	_volley_yaw = _volley_start_yaw
-	actor._camera_yaw = _volley_start_yaw
-	actor.camera_pivot.rotation.y = _volley_start_yaw
-	end_stealth()
-	volley_active = true
-	volley_elapsed = 0.0
-	volley_shots_fired = 0
-	return true
+func start_hawk() -> bool:
+	return hawk_skill.begin()
 
 func _can_skill() -> bool:
-	return not bait_ultimate.input_busy() and actor.controls_enabled and not actor.is_dead and not actor.is_shield_broken and not actor.is_shield_stunned and not charging and not volley_active and not seeking_active and not counter_active and not dash_active and recovery_remaining <= 0.0 and actor._knockback_timer <= 0.0 and actor.combat_state in [PlayerController.CombatState.IDLE, PlayerController.CombatState.RUN]
+	return not actor.is_control_impaired() and not bait_ultimate.input_busy() and actor.controls_enabled and not actor.is_dead and not actor.is_shield_broken and not actor.is_shield_stunned and not charging and not hawk_skill.casting and not seeking_active and not counter_active and not dash_active and recovery_remaining <= 0.0 and actor._knockback_timer <= 0.0 and actor.combat_state in [PlayerController.CombatState.IDLE, PlayerController.CombatState.RUN]
 
 func start_seeking() -> bool:
 	if not _can_skill():
@@ -257,8 +269,8 @@ func start_seeking() -> bool:
 	return true
 
 func start_escape() -> bool:
-	# C can cancel charge/volley/guard, but not dodge, Counter or hit stun.
-	if bait_ultimate.input_busy() or not actor.controls_enabled or actor.is_dead or actor.is_shield_broken or actor.is_shield_stunned or dash_active or counter_active or actor._knockback_timer > 0.0 or actor.combat_state not in [PlayerController.CombatState.IDLE, PlayerController.CombatState.RUN, PlayerController.CombatState.BLOCK]:
+	# C can cancel charge/Z/guard, but not dodge, Counter or hit stun.
+	if bait_ultimate.input_busy() or not actor.controls_enabled or actor.is_dead or actor.is_shield_broken or actor.is_shield_stunned or actor.is_control_impaired() or dash_active or counter_active or actor._knockback_timer > 0.0 or actor.combat_state not in [PlayerController.CombatState.IDLE, PlayerController.CombatState.RUN, PlayerController.CombatState.BLOCK]:
 		return false
 	if not actor.ability_system.cast_ability("skill_3"):
 		return false
@@ -274,6 +286,8 @@ func start_escape() -> bool:
 	_set_stealth_visual(true)
 	_escape_effect.global_position = actor.global_position + Vector3(0, 0.6, 0)
 	_escape_effect.restart()
+	if vfx_manager:
+		vfx_manager.trigger_escape_whirlwind(actor.global_position + Vector3(0, 0.2, 0))
 	return true
 
 func process_escape_movement(delta: float) -> void:
@@ -295,14 +309,31 @@ func _collect_stealth_meshes(node: Node) -> void:
 	if node is MeshInstance3D and node.mesh:
 		for index: int in range(node.mesh.get_surface_count()):
 			var original: Material = node.get_active_material(index)
-			if original is StandardMaterial3D:
-				var faded: StandardMaterial3D = original.duplicate() as StandardMaterial3D
+			if original is StandardMaterial3D or original is ShaderMaterial:
+				var faded: StandardMaterial3D = StandardMaterial3D.new()
+				if original is StandardMaterial3D:
+					faded = original.duplicate() as StandardMaterial3D
+				elif original is ShaderMaterial:
+					var alb: Variant = original.get_shader_parameter("albedo_color")
+					faded.albedo_color = alb if alb is Color else Color(0.3, 0.5, 0.3, 1.0)
 				faded.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
 				faded.albedo_color.a = 0.22
 				faded.cull_mode = BaseMaterial3D.CULL_DISABLED
 				_stealth_surfaces.append({"mesh": node, "index": index, "original": node.get_surface_override_material(index), "faded": faded})
 	for child: Node in node.get_children():
 		_collect_stealth_meshes(child)
+
+func apply_archer_look() -> void:
+	if actor and actor.has_method("apply_archer_look"):
+		actor.apply_archer_look()
+
+func update_cape(delta: float) -> void:
+	if actor and actor.has_method("update_cape"):
+		actor.update_cape(delta)
+
+func trigger_hit_flash(color: Color = Color(1.0, 0.85, 0.85, 0.8), duration: float = 0.15) -> void:
+	if actor and actor.has_method("trigger_archer_hit_flash"):
+		actor.trigger_archer_hit_flash(color, duration)
 
 func _set_stealth_visual(active: bool) -> void:
 	# Local silhouette remains readable; enemies must respect targetability.
@@ -359,7 +390,7 @@ func _record_counter_attacker(payload: Variant) -> void:
 				nearest = distance
 
 func start_counter() -> bool:
-	if bait_ultimate.input_busy() or not actor.controls_enabled or actor.is_dead or counter_active or actor.is_shield_broken or actor.is_shield_stunned or not actor.is_counter_window_active():
+	if bait_ultimate.input_busy() or not actor.controls_enabled or actor.is_dead or actor.is_control_impaired() or counter_active or actor.is_shield_broken or actor.is_shield_stunned or not actor.is_counter_window_active():
 		return false
 	if not is_instance_valid(_counter_target) or _counter_target == actor:
 		return false
@@ -423,9 +454,8 @@ func interrupt() -> void:
 		if actor.combat_state == PlayerController.CombatState.COUNTER:
 			actor.transition_to(PlayerController.CombatState.IDLE)
 		recovery_remaining = maxf(recovery_remaining, 0.30)
-	if volley_active:
-		volley_active = false
-		recovery_remaining = maxf(recovery_remaining, VOLLEY_RECOVERY)
+	if hawk_skill:
+		hawk_skill.interrupt()
 
 func cancel_charge() -> void:
 	charging = false
@@ -442,6 +472,7 @@ func clear_projectiles() -> void:
 
 func reset() -> void:
 	interrupt()
+	if hawk_skill: hawk_skill.stop()
 	if bait_ultimate:
 		bait_ultimate.stop()
 	end_stealth()
@@ -465,13 +496,14 @@ func release_arrow() -> bool:
 	if is_instance_valid(locked_target):
 		direction = (locked_target.global_position + Vector3(0, 0.9, 0) - origin).normalized()
 	var ratio: float = clampf(charge_time / MAX_CHARGE, 0.0, 1.0)
-	_spawn_arrow(direction, lerpf(18.0, 32.0, ratio), lerpf(12.0, 36.0, ratio), true, 15.0)
-	_release_sound.pitch_scale = lerpf(1.2, 0.9, ratio)
+	var is_crit: bool = ratio >= 0.98
+	_spawn_arrow(direction, lerpf(18.0, 34.0, ratio), lerpf(12.0, 36.0, ratio), true, 15.0, false, null, 0.0, is_crit)
+	_release_sound.pitch_scale = lerpf(1.2, 0.85, ratio)
 	cancel_charge()
 	recovery_remaining = RECOVERY
 	return true
 
-func _spawn_arrow(direction: Vector3, speed: float, damage: float, basic: bool, shield_damage: float, counter: bool = false, homing: Node3D = null, orbit_phase: float = 0.0) -> void:
+func _spawn_arrow(direction: Vector3, speed: float, damage: float, basic: bool, shield_damage: float, counter: bool = false, homing: Node3D = null, orbit_phase: float = 0.0, is_crit: bool = false) -> void:
 	var origin: Vector3 = actor.global_position + Vector3(0, 1.35, 0)
 	var arrow: Node3D = ARROW_SCENE.instantiate() as Node3D
 	actor.add_child(arrow)
@@ -480,15 +512,28 @@ func _spawn_arrow(direction: Vector3, speed: float, damage: float, basic: bool, 
 	arrow.look_at(origin + direction, Vector3.UP)
 	if counter:
 		arrow.scale = Vector3(3.0, 3.0, 2.4)
-	if not basic:
-		var trail: MeshInstance3D = MeshInstance3D.new()
-		trail.mesh = _volley_trail_mesh
+	elif is_crit:
+		arrow.scale = Vector3(1.35, 1.35, 1.5)
+
+	# Dynamic visual trail for ALL arrows
+	var trail: MeshInstance3D = MeshInstance3D.new()
+	trail.mesh = _volley_trail_mesh
+	if is_crit:
+		trail.material_override = _crit_trail_material
+	elif basic:
+		trail.material_override = _basic_trail_material
+	else:
 		trail.material_override = _seeking_material if is_instance_valid(homing) else (_counter_trail_material if counter else _volley_trail_material)
-		trail.rotation.x = PI * 0.5
-		trail.position.z = 0.42
-		arrow.add_child(trail)
+	trail.rotation.x = PI * 0.5
+	trail.position.z = 0.42
+	arrow.add_child(trail)
+
+	# Trigger muzzle shockwave ring
+	if vfx_manager:
+		vfx_manager.trigger_muzzle_flash(origin, direction)
+
 	# Sweep starts at the chest, including the muzzle segment. Never spawn past walls.
-	_arrows.append({"node": arrow, "direction": direction, "speed": speed, "damage": damage, "distance": 0.0, "basic": basic, "shield_damage": shield_damage, "homing": homing, "spiral": is_instance_valid(homing), "guide": origin, "age": 0.0, "phase": orbit_phase, "goal": homing.global_position + Vector3(0, 0.9, 0) if is_instance_valid(homing) else origin + direction * RANGE})
+	_arrows.append({"node": arrow, "direction": direction, "speed": speed, "damage": damage, "distance": 0.0, "basic": basic, "shield_damage": shield_damage, "homing": homing, "spiral": is_instance_valid(homing), "guide": origin, "age": 0.0, "phase": orbit_phase, "goal": homing.global_position + Vector3(0, 0.9, 0) if is_instance_valid(homing) else origin + direction * RANGE, "is_crit": is_crit})
 	if _arrows.size() > 12:
 		var oldest: Dictionary = _arrows.pop_front()
 		oldest.node.queue_free()
@@ -499,7 +544,7 @@ func _spawn_arrow(direction: Vector3, speed: float, damage: float, basic: bool, 
 	_release_sound.play()
 
 func _physics_process(delta: float) -> void:
-	if not actor.controls_enabled or actor.is_dead:
+	if not actor.controls_enabled or actor.is_dead or actor.is_control_impaired():
 		reset()
 		return
 	if stealth_remaining > 0.0:
@@ -521,24 +566,9 @@ func _physics_process(delta: float) -> void:
 				seeking_active = false
 				recovery_remaining = 0.35
 	recovery_remaining = maxf(0.0, recovery_remaining - delta)
-	if volley_active:
-		if actor.combat_state not in [PlayerController.CombatState.IDLE, PlayerController.CombatState.RUN] or actor._knockback_timer > 0.0 or not actor._is_mouse_captured:
-			interrupt()
-		else:
-			volley_elapsed += delta
-			var turn: float = clampf(wrapf(actor._camera_yaw - _volley_start_yaw, -PI, PI), -deg_to_rad(12.0), deg_to_rad(12.0))
-			_volley_yaw = move_toward(_volley_yaw, _volley_start_yaw + turn, deg_to_rad(25.0) * delta)
-			actor.visuals.rotation.y = _volley_yaw
-			var horizontal: float = sqrt(maxf(0.0, 1.0 - _volley_direction.y * _volley_direction.y))
-			var direction: Vector3 = Vector3(-sin(_volley_yaw) * horizontal, _volley_direction.y, -cos(_volley_yaw) * horizontal)
-			while volley_shots_fired < VOLLEY_SHOTS and volley_elapsed >= VOLLEY_STARTUP + volley_shots_fired * VOLLEY_INTERVAL:
-				_spawn_arrow(direction, 30.0, 7.0, false, 5.0)
-				volley_shots_fired += 1
-			if volley_elapsed >= VOLLEY_STARTUP + (VOLLEY_SHOTS - 1) * VOLLEY_INTERVAL:
-				volley_active = false
-				recovery_remaining = VOLLEY_RECOVERY
 	if charging:
-		if actor.combat_state not in [PlayerController.CombatState.IDLE, PlayerController.CombatState.RUN] or actor._knockback_timer > 0.0 or not actor._is_mouse_captured:
+		var mouse_ok: bool = actor._is_mouse_captured or DisplayServer.get_name() == "headless"
+		if actor.combat_state not in [PlayerController.CombatState.IDLE, PlayerController.CombatState.RUN] or actor._knockback_timer > 0.0 or not mouse_ok:
 			cancel_charge()
 		else:
 			charge_time = minf(MAX_CHARGE, charge_time + delta)
@@ -665,6 +695,8 @@ func _impact(target: Object, damage: float, incoming_position: Vector3, position
 			actor.combat.trigger_block_impact(position, (position - incoming_position).normalized())
 		else:
 			actor.combat.trigger_hit_impact(position, (position - incoming_position).normalized())
+		if vfx_manager:
+			vfx_manager.trigger_arrow_impact(position, (position - incoming_position).normalized(), damage >= 28.0)
 
 func _target_valid(target: Node3D) -> bool:
 	if not is_instance_valid(target) or target == actor or not target is CollisionObject3D or not target.has_method("take_damage"):
@@ -709,14 +741,17 @@ func _find_target() -> Node3D:
 
 func _process(_delta: float) -> void:
 	_pose_delta = _delta
-	if actor.spectacle and (charging or seeking_active or volley_active):
+	if actor.spectacle and (charging or seeking_active or hawk_skill.casting):
 		actor.spectacle.wake()
 	_update_bow()
+	if vfx_manager:
+		var bow_pos: Vector3 = _nocked_arrow.global_position if is_instance_valid(_nocked_arrow) else (_bow.global_position if _bow else actor.global_position + Vector3(0, 1.35, 0))
+		vfx_manager.update_charge_vfx(charging, charge_time / MAX_CHARGE, bow_pos)
 	if _label:
 		_label.visible = actor.controls_enabled and not actor.is_dead
 		_bar.visible = _label.visible and charging
 		_bar.value = charge_time / MAX_CHARGE * 100.0
-		_label.text = ("COUNTER · TÊN LỚN + BẬT LÙI" if counter_active else ("PERFECT DODGE · PHẢN CÔNG SẴN SÀNG" if actor.is_counter_window_active() else ("ĐỠ BẰNG CUNG" if actor.is_blocking else ("LOẠT TÊN · %d / %d" % [volley_shots_fired, VOLLEY_SHOTS] if volley_active else ("ĐÃ KHÓA MỤC TIÊU" if charging and is_instance_valid(locked_target) else ("NGẮM TỰ DO" if charging else ""))))))
+		_label.text = ("COUNTER · TÊN LỚN + BẬT LÙI" if counter_active else ("PERFECT DODGE · PHẢN CÔNG SẴN SÀNG" if actor.is_counter_window_active() else ("ĐỠ BẰNG CUNG" if actor.is_blocking else ("MỒI CÁ · DIỀU HÂU" if hawk_skill.casting else ("ĐÃ KHÓA MỤC TIÊU" if charging and is_instance_valid(locked_target) else ("NGẮM TỰ DO" if charging else ""))))))
 	if _label and bait_ultimate.active():
 		_label.text += "\n" + bait_ultimate.status()
 	if _label and seeking_active:
@@ -730,22 +765,64 @@ func _process(_delta: float) -> void:
 		_marker.global_position = locked_target.global_position + Vector3(0, 0.05, 0)
 		_marker.scale = Vector3.ONE * (1.15 if seeking_active else 1.0)
 
+func _ensure_bow_attachment() -> void:
+	if _bow_attachment == null and actor and actor._skeleton:
+		_bow_attachment = BoneAttachment3D.new()
+		_bow_attachment.name = "BowHandAttachment"
+		_bow_attachment.bone_name = "hand.L"
+		actor._skeleton.add_child(_bow_attachment)
+
 func _update_bow() -> void:
-	var aiming: bool = charging or volley_active or seeking_active or counter_active or actor.is_blocking or bait_ultimate.input_busy()
-	var ratio: float = charge_time / MAX_CHARGE if charging else 0.0
+	if actor.hawk_carry and actor.hawk_carry.active(): return
+	_ensure_bow_attachment()
+	var releasing: bool = recovery_remaining > (RECOVERY - 0.15)
+	var aiming: bool = charging or hawk_skill.casting or seeking_active or counter_active or actor.is_blocking or bait_ultimate.input_busy() or releasing
+	var ratio: float = charge_time / MAX_CHARGE if charging else (1.0 if releasing else 0.0)
 	if seeking_active:
 		ratio = clampf(seeking_elapsed / 0.28, 0.0, 1.0)
-	if volley_active:
-		ratio = volley_elapsed / VOLLEY_STARTUP if volley_elapsed < VOLLEY_STARTUP else fmod(volley_elapsed - VOLLEY_STARTUP, VOLLEY_INTERVAL) / VOLLEY_INTERVAL
-	_bow.position = Vector3(0.05, 1.35, -0.40) if aiming else Vector3(0.3, 0.9, 0)
-	_bow.rotation = Vector3(0, 0, PI * 0.5 if actor.is_blocking else 0.0)
+	if hawk_skill.casting:
+		ratio = clampf(hawk_skill.elapsed / .3, 0, 1)
+	if aiming:
+		if not _is_bow_aim_parented:
+			if _bow_attachment and _bow.get_parent() == _bow_attachment:
+				_bow.reparent(actor.visuals, true)
+			_is_bow_aim_parented = true
+		if actor.is_blocking:
+			_bow.position = Vector3(0.00, 1.35, -0.36)
+			_bow.rotation = Vector3(0, 0, PI * 0.5)
+		elif actor.is_third_person:
+			# Third-person archery posture:
+			# Left hand holds bow forward at natural reach, canted ~20 deg right
+			_bow.position = Vector3(0.02, 1.35, -0.38)
+			_bow.rotation = Vector3(deg_to_rad(3.0), deg_to_rad(-6.0), deg_to_rad(-20.0))
+		else:
+			# First-person archery posture:
+			# Bow frames the lower right foreground, canted ~24 deg right, clear sightline down arrow
+			_bow.position = Vector3(0.12, 1.35, -0.40)
+			_bow.rotation = Vector3(deg_to_rad(2.0), deg_to_rad(-4.0), deg_to_rad(-24.0))
+	else:
+		if _is_bow_aim_parented:
+			if _bow_attachment and is_instance_valid(_bow_attachment):
+				if _bow.get_parent() != _bow_attachment:
+					_bow.reparent(_bow_attachment, false)
+				_bow.position = BOW_HAND_OFFSET
+				_bow.rotation = BOW_HAND_ROTATION
+				_is_bow_aim_parented = false
+			else:
+				_bow.position = Vector3(0.3, 0.9, 0)
+				_bow.rotation = Vector3.ZERO
+		elif not _bow_attachment:
+			_bow.position = Vector3(0.3, 0.9, 0)
+			_bow.rotation = Vector3.ZERO
 	if counter_active:
 		ratio = maxf(0.0, 1.0 - counter_elapsed / 0.12)
 	if bait_ultimate.input_busy():
 		ratio = 0.75
-	_nocked_arrow.visible = aiming and not actor.is_blocking and not counter_active and not bait_ultimate.input_busy()
-	_nocked_arrow.position = Vector3(0, 0, 0.10 + ratio * 0.32)
-	var middle: Vector3 = Vector3(0, 0, 0.10 + ratio * 0.32)
+	var draw_dist: float = 0.26
+	_nocked_arrow.visible = aiming and not actor.is_blocking and not counter_active and not bait_ultimate.input_busy() and not releasing
+	var nock_local_z: float = 0.10 if releasing else (0.10 + ratio * draw_dist)
+	_nocked_arrow.position = Vector3(0, 0, nock_local_z)
+	var middle: Vector3 = Vector3(0, 0, nock_local_z)
 	for i: int in range(2):
 		var tip: Vector3 = Vector3(0, 0.58 if i == 0 else -0.58, 0.10)
 		var offset: Vector3 = middle - tip
@@ -753,16 +830,47 @@ func _update_bow() -> void:
 		_strings[i].quaternion = Quaternion(Vector3.UP, offset.normalized())
 		_strings[i].scale = Vector3(1, offset.length(), 1)
 	# Pose the two arms after locomotion animation; keep lower-body walking intact.
+	# Skeleton local space has CharacterModel.rotation.y = PI, so +Z is FORWARD and +X is LEFT (-X is RIGHT).
 	if aiming and actor._skeleton:
-		_pose_arm("L", Vector3(0.25 if actor.is_blocking else 0.05, 1.35, -0.4), Vector3(0.30, 1.37, -0.22))
-		_pose_arm("R", Vector3(-0.2 if actor.is_blocking else 0.05, 1.35, -0.30 + ratio * 0.32), Vector3(-0.4, 1.34, -0.17))
+		if actor.is_blocking:
+			# Blocking: Bow held horizontally across chest; both hands brace the bow limbs in front
+			_pose_arm("L", Vector3(0.18, 1.34, 0.36), Vector3(0.35, 1.28, 0.18))
+			_pose_arm("R", Vector3(-0.18, 1.34, 0.36), Vector3(-0.35, 1.28, 0.18))
+		elif actor.is_third_person:
+			# Third-person: Left hand directly grips bow handle
+			var grip_skel: Vector3 = actor._skeleton.to_local(_bow.global_position)
+			_pose_arm("L", grip_skel, Vector3(0.26, 1.25, 0.18))
+
+			# Right hand directly tracks the arrow nock and bowstring:
+			var nock_skel: Vector3 = actor._skeleton.to_local(_nocked_arrow.global_position)
+			if releasing:
+				nock_skel.z -= 0.04 # Follow-through release backwards
+
+			# Right elbow pulls back dynamically with draw ratio:
+			var elbow_r_x: float = -0.35
+			var elbow_r_y: float = lerpf(1.25, 1.30, ratio)
+			var elbow_r_z: float = lerpf(0.12, -0.40, ratio)
+			_pose_arm("R", nock_skel, Vector3(elbow_r_x, elbow_r_y, elbow_r_z))
+		else:
+			# First-person: Left hand holds bow handle framing right side
+			var grip_skel: Vector3 = actor._skeleton.to_local(_bow.global_position)
+			_pose_arm("L", grip_skel, Vector3(0.18, 1.22, 0.22))
+
+			# Right hand drawing nock:
+			var nock_skel: Vector3 = actor._skeleton.to_local(_nocked_arrow.global_position)
+			if releasing:
+				nock_skel.z -= 0.04
+
+			# Keep right elbow low and back in First Person so it NEVER obstructs the camera view!
+			var elbow_r := Vector3(-0.35, 1.15, -0.35)
+			_pose_arm("R", nock_skel, elbow_r)
 	elif actor._skeleton:
 		actor._skeleton.clear_bones_global_pose_override()
 
 func _pose_arm(side: String, hand_position: Vector3, elbow: Vector3) -> void:
 	if not _pose_bones.has("hand." + side):
 		return
-	var blend: float = 1 - exp(-16 * _pose_delta)
+	var blend: float = 1.0 - exp(-16.0 * _pose_delta)
 	_pose_hands[side] = (_pose_hands[side] as Vector3).lerp(hand_position, blend)
 	_pose_elbows[side] = (_pose_elbows[side] as Vector3).lerp(elbow, blend)
 	var upper_rest: Transform3D = _pose_rests["upper_arm." + side]
@@ -771,20 +879,24 @@ func _pose_arm(side: String, hand_position: Vector3, elbow: Vector3) -> void:
 	var reach: Vector3 = _pose_hands[side] - upper_rest.origin
 	var first_length: float = upper_rest.origin.distance_to(forearm_rest.origin)
 	var second_length: float = forearm_rest.origin.distance_to(hand_rest.origin)
-	var distance: float = clampf(reach.length(), absf(first_length-second_length)+0.001, first_length+second_length-0.001)
+	var distance: float = clampf(reach.length(), absf(first_length - second_length) + 0.001, first_length + second_length - 0.001)
 	var direction: Vector3 = reach.normalized()
 	var hint: Vector3 = _pose_elbows[side] - upper_rest.origin
 	var perpendicular: Vector3 = (hint - direction * hint.dot(direction)).normalized()
 	if perpendicular.length_squared() < 0.001:
 		perpendicular = direction.cross(Vector3.UP).normalized()
-	var along: float = (first_length*first_length-second_length*second_length+distance*distance)/(2*distance)
-	var height: float = sqrt(maxf(0, first_length*first_length-along*along))
-	var actual_elbow: Vector3 = upper_rest.origin + direction*along + perpendicular*height
-	var goal: Vector3 = upper_rest.origin + direction*distance
-	var upper_basis: Basis = Basis(Quaternion(upper_rest.basis.y.normalized(), (actual_elbow-upper_rest.origin).normalized())) * upper_rest.basis
-	var forearm_basis: Basis = Basis(Quaternion(forearm_rest.basis.y.normalized(), (goal-actual_elbow).normalized())) * forearm_rest.basis
-	actor._skeleton.set_bone_global_pose_override(_pose_bones["upper_arm."+side], Transform3D(upper_basis,upper_rest.origin),1,true)
-	actor._skeleton.set_bone_global_pose_override(_pose_bones["forearm."+side], Transform3D(forearm_basis,actual_elbow),1,true)
+	var along: float = (first_length * first_length - second_length * second_length + distance * distance) / (2.0 * distance)
+	var height: float = sqrt(maxf(0.0, first_length * first_length - along * along))
+	var actual_elbow: Vector3 = upper_rest.origin + direction * along + perpendicular * height
+	var goal: Vector3 = upper_rest.origin + direction * distance
+
+	var dir_upper: Vector3 = (actual_elbow - upper_rest.origin).normalized()
+	var upper_basis: Basis = Basis(Quaternion(upper_rest.basis.y.normalized(), dir_upper)) * upper_rest.basis
+	actor._skeleton.set_bone_global_pose_override(_pose_bones["upper_arm." + side], Transform3D(upper_basis, upper_rest.origin), 1.0, true)
+
+	var dir_forearm: Vector3 = (goal - actual_elbow).normalized()
+	var forearm_basis: Basis = Basis(Quaternion(forearm_rest.basis.y.normalized(), dir_forearm)) * forearm_rest.basis
+	actor._skeleton.set_bone_global_pose_override(_pose_bones["forearm." + side], Transform3D(forearm_basis, actual_elbow), 1.0, true)
 
 func _build_hud() -> void:
 	var layer: CanvasLayer = CanvasLayer.new()

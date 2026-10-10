@@ -146,6 +146,14 @@ signal ability_action_started(slot_name: String, ability: AbilityData)
 signal ability_action_finished(slot_name: String)
 
 @export var hero_profile: String = "knight"
+const ARCHER_TOON_SHADER: Shader = preload("res://shaders/archer_toon.gdshader")
+const ARCHER_CAPE_SHADER: Shader = preload("res://shaders/archer_cape.gdshader")
+var _cape_material: ShaderMaterial = null
+var _archer_toon_materials: Array[ShaderMaterial] = []
+var _cape_current_drag: Vector3 = Vector3.ZERO
+var _cape_current_tuck: float = 0.0
+var _hit_flash_tween: Tween = null
+var hawk_carry: HawkCarryEffect
 var archer_combat: ArcherCombat = null
 var spectacle: Node
 var _dive_vfx: Node
@@ -185,6 +193,8 @@ const SKY_DIVE_HOVER_GRAVITY: float = 4.0  # Reduced gravity during aim
 
 var anim_player: AnimationPlayer = null
 var _skeleton: Skeleton3D = null
+var ragdoll: Node = null
+var last_hit_was_blocked: bool = false
 var _head_bone_idx: int = -1
 var _neck_bone_idx: int = -1
 
@@ -270,6 +280,11 @@ func _ready() -> void:
 		_camera_pitch = camera_pivot.rotation.x
 	if spring_arm:
 		spring_arm.add_excluded_object(get_rid())
+		if spring_arm.shape == null:
+			var cam_shape := SphereShape3D.new()
+			cam_shape.radius = 0.22
+			spring_arm.shape = cam_shape
+			spring_arm.margin = 0.12
 	if hero_profile in ["archer", "wizard"]:
 		var old_model: Node = visuals.get_node("CharacterModel")
 		visuals.remove_child(old_model)
@@ -277,7 +292,14 @@ func _ready() -> void:
 		var model_scene: PackedScene = preload("res://assets/models/elemental_wizard.glb") if hero_profile == "wizard" else preload("res://assets/models/forest_archer.glb")
 		var hunter: Node3D = model_scene.instantiate() as Node3D
 		hunter.name = "CharacterModel"
+		if hero_profile == "archer":
+			hunter.rotation.y = PI
 		visuals.add_child(hunter)
+		if hero_profile == "archer":
+			apply_archer_look()
+	hawk_carry = HawkCarryEffect.new()
+	hawk_carry.actor = self
+	add_child(hawk_carry)
 	_setup_animation_player()
 	set_third_person(is_third_person)
 
@@ -299,7 +321,7 @@ func _ready() -> void:
 		dodge_controller.name = "DodgeController"
 		add_child(dodge_controller)
 	dodge_controller.stamina_component = stamina_component
-	if hero_profile == "knight":
+	if hero_profile in ["knight", "archer"]:
 		dodge_controller.dodge_duration = 0.40
 		dodge_controller.dodge_distance = 5.0
 	if not dodge_controller.dodge_completed.is_connected(_on_dodge_completed):
@@ -326,6 +348,9 @@ func _ready() -> void:
 		archer_combat.name = "ArcherCombat"
 		archer_combat.actor = self
 		add_child(archer_combat)
+		var archer_dash = preload("res://scripts/ArcherDashPresentation.gd").new()
+		archer_dash.name = "ArcherDashPresentation"
+		add_child(archer_dash)
 	elif hero_profile == "wizard":
 		ability_system.clear_loadout()
 		wizard_combat = WizardCombat.new()
@@ -361,9 +386,7 @@ func _unhandled_input(event: InputEvent) -> void:
 			_camera_yaw -= motion.relative.x * mouse_sensitivity
 			_camera_pitch -= motion.relative.y * mouse_sensitivity
 			_camera_pitch = clampf(_camera_pitch, deg_to_rad(min_pitch), deg_to_rad(max_pitch))
-			if camera_pivot:
-				camera_pivot.rotation.y = _camera_yaw
-				camera_pivot.rotation.x = _camera_pitch + _cam_recoil_pitch
+			_update_camera()
 		elif event.is_action_pressed("toggle_perspective") and not event.is_echo():
 			toggle_camera_perspective()
 		return
@@ -392,9 +415,7 @@ func _unhandled_input(event: InputEvent) -> void:
 		_camera_pitch -= motion.relative.y * mouse_sensitivity
 		_camera_pitch = clampf(_camera_pitch, deg_to_rad(min_pitch), deg_to_rad(max_pitch))
 
-		if camera_pivot:
-			camera_pivot.rotation.y = _camera_yaw
-			camera_pivot.rotation.x = _camera_pitch + _cam_recoil_pitch
+		_update_camera()
 
 		if visuals:
 			visuals.rotation.y = _camera_yaw
@@ -410,6 +431,10 @@ func _unhandled_input(event: InputEvent) -> void:
 		return
 
 	if is_control_impaired():
+		# Allow Wake-up Block input while settling/recovering on ground
+		if event.is_action_pressed("block") and is_ragdoll_active() and ragdoll and ragdoll.call("can_wake_up_block"):
+			if not is_shield_broken:
+				_start_block()
 		return
 	if wizard_combat:
 		wizard_combat.handle_input(event)
@@ -450,6 +475,9 @@ func _unhandled_input(event: InputEvent) -> void:
 
 
 func _physics_process(delta: float) -> void:
+	if hawk_carry and hawk_carry.active():
+		hawk_carry.step(delta)
+		return
 	if spectacle and hero_profile == "knight" and active_ability_action and active_ability_action.is_active():
 		spectacle.wake()
 	if not controls_enabled and not is_dead:
@@ -477,8 +505,12 @@ func _physics_process(delta: float) -> void:
 		_knockback_timer=maxf(0.0,_knockback_timer-delta)
 		velocity.x=0.0 if frost and frost.active() else _knockback_vel.x*pushed
 		velocity.z=0.0 if frost and frost.active() else _knockback_vel.z*pushed
-		velocity.y=-0.1 if is_on_floor() else velocity.y-gravity*delta
+		velocity.y = -0.1 if (is_on_floor() and velocity.y <= 0.0) else velocity.y - gravity * delta
 		move_and_slide()
+		return
+
+	if is_ragdoll_active():
+		velocity = Vector3.ZERO
 		return
 
 	if wizard_combat and wizard_combat.storm.active():
@@ -509,7 +541,10 @@ func _physics_process(delta: float) -> void:
 			velocity.y = -0.1
 		move_and_slide()
 		if visuals and dodge_controller and dodge_controller.world_direction.length_squared() > 0.01:
-			visuals.rotation.y = atan2(-dodge_controller.world_direction.x, -dodge_controller.world_direction.z)
+			if hero_profile == "archer":
+				visuals.rotation.y = _camera_yaw
+			else:
+				visuals.rotation.y = atan2(-dodge_controller.world_direction.x, -dodge_controller.world_direction.z)
 		return
 
 	if archer_combat and archer_combat.bait_ultimate.input_busy() and _knockback_timer <= 0.0:
@@ -644,8 +679,8 @@ func _physics_process(delta: float) -> void:
 		target_speed *= 0.45 # Phase 3: 45% block movement speed
 	if wizard_combat and (wizard_combat.charging or wizard_combat.spell != "" or wizard_combat.staff_strike.active):
 		target_speed *= 0.55
-	if archer_combat and (archer_combat.charging or archer_combat.volley_active or archer_combat.seeking_active):
-		target_speed *= 0.35 if archer_combat.volley_active else 0.55
+	if archer_combat and (archer_combat.charging or archer_combat.hawk_skill.casting or archer_combat.seeking_active):
+		target_speed *= 0.55
 	var target_horizontal: Vector3 = move_dir * target_speed
 	if _shield_stun_timer > 0.0:
 		target_horizontal = Vector3.ZERO # Stop movement during shield break stun
@@ -813,7 +848,9 @@ func transition_to(new_state: CombatState) -> bool:
 			_knockback_vel = Vector3.ZERO
 			combat_state = CombatState.DODGE
 			if anim_player:
-				if anim_player.has_animation("dodge"):
+				if anim_player.has_animation("dash_forward"):
+					pass
+				elif anim_player.has_animation("dodge"):
 					anim_player.speed_scale = 1.0
 					anim_player.play("dodge", 0.05)
 				elif anim_player.has_animation("run"):
@@ -864,6 +901,9 @@ func _enter_dead_state() -> void:
 	if stamina_component:
 		stamina_component.reset_stamina()
 	CombatTimeManager.reset_time()
+
+	if ragdoll and ragdoll.call("is_active"):
+		ragdoll.call("stop_ragdoll")
 
 	# Stop movement and combat actions
 	velocity = Vector3.ZERO
@@ -1131,6 +1171,12 @@ func _try_dodge() -> bool:
 		var facing_local := visuals.global_basis.orthonormalized().inverse() * world_dir
 		var backflip := absf(facing_local.z) >= absf(facing_local.x) and facing_local.z > 0.0
 		dodge_controller.dodge_duration = 0.45 if backflip else 0.40
+		dodge_controller.dodge_distance = 5.0
+	elif hero_profile == "archer":
+		var facing_local := visuals.global_basis.orthonormalized().inverse() * world_dir
+		var backflip := absf(facing_local.z) >= absf(facing_local.x) and facing_local.z > 0.0
+		dodge_controller.dodge_duration = 0.60 if backflip else 0.40
+		dodge_controller.dodge_distance = 6.5 if backflip else 5.0
 	if transition_to(CombatState.DODGE):
 		var started: bool = dodge_controller.start_dodge(resolved_dir, world_dir)
 		if started and combat_feedback and combat_feedback.has_method("trigger_dodge_feedback"):
@@ -1142,6 +1188,9 @@ func _try_dodge() -> bool:
 
 func _on_dodge_completed() -> void:
 	if combat_state == CombatState.DODGE:
+		if hero_profile in ["knight", "archer"]:
+			dodge_controller.dodge_duration = 0.40
+			dodge_controller.dodge_distance = 5.0
 		var input_x: float = external_move_direction.x if external_controlled else Input.get_axis("move_left", "move_right")
 		var input_z: float = external_move_direction.z if external_controlled else Input.get_axis("move_forward", "move_backward")
 		var has_input: bool = (abs(input_x) > 0.1 or abs(input_z) > 0.1)
@@ -1167,16 +1216,16 @@ func get_facing_direction() -> Vector3:
 func _try_cast_ability(slot_name: String) -> bool:
 	if is_control_impaired():
 		return false
-	if wizard_combat:
+	if hero_profile == "wizard" and wizard_combat:
 		match slot_name:
 			"skill_1": return wizard_combat.start_staff()
 			"skill_2": return wizard_combat.start_polymorph()
 			"skill_3": return wizard_combat.ice.begin()
 			"ultimate": return wizard_combat.storm.begin()
 		return false
-	if archer_combat:
+	if hero_profile == "archer" and archer_combat:
 		match slot_name:
-			"skill_1": return archer_combat.start_volley()
+			"skill_1": return archer_combat.start_hawk()
 			"skill_2": return archer_combat.start_seeking()
 			"skill_3": return archer_combat.start_escape()
 			"ultimate": return archer_combat.bait_ultimate.begin()
@@ -1476,7 +1525,8 @@ func _fit_z_shield_pose() -> void:
 		_z_shield_fit.fit(_z_shield_visual_root)
 
 
-func _process(_delta: float) -> void:
+func _process(delta: float) -> void:
+	_update_camera(delta)
 	if not is_instance_valid(_z_shield_visual_root) or not _z_shield_visual_root.visible:
 		return
 	if combat_state == CombatState.DEAD or _shield_stun_timer > 0.0 or is_control_impaired() or not controls_enabled or not active_ability_action or not active_ability_action.is_active():
@@ -1828,10 +1878,23 @@ func _apply_shield_charge_impact(target_node: Node, fwd: Vector3) -> void:
 	target_node.call("take_damage",dmg,global_position)
 	# Preserve Perfect Dodge's own negation/reward. A missed contact cannot stun.
 	if evaded or (target_node is PlayerController and target_node.health_component.current_health>=hp_before):return
-	if target_node.has_method("apply_impact_stun"):
-		target_node.call("apply_impact_stun",SHIELD_RAM_STUN)
-	if target_node.has_method("apply_knockback"):
-		target_node.call("apply_knockback",fwd,action.data.knockback_distance,action.data.knockback_duration)
+	var target_is_player: bool = target_node is PlayerController
+	var blocked_and_held: bool = false
+	if target_is_player:
+		var target_pc: PlayerController = target_node as PlayerController
+		blocked_and_held = target_pc.last_hit_was_blocked and not target_pc.is_shield_broken
+
+	if not blocked_and_held:
+		if target_node.has_method("trigger_ragdoll") and not target_node.get("is_dead") and target_node.get("combat_state") != CombatState.DEAD:
+			var launch_dir: Vector3 = fwd.normalized() if fwd.length_squared() > 0.0001 else Vector3.FORWARD
+			# Powerful launch impulse: high speed horizontal trajectory with buoyant hang-time and extended floor slide
+			var launch_impulse: Vector3 = launch_dir * 11.5 + Vector3.UP * 4.8
+			target_node.call("trigger_ragdoll", launch_impulse)
+
+		if target_node.has_method("apply_impact_stun"):
+			target_node.call("apply_impact_stun",SHIELD_RAM_STUN)
+		if target_node.has_method("apply_knockback"):
+			target_node.call("apply_knockback",fwd,action.data.knockback_distance,action.data.knockback_duration)
 	if combat:combat.trigger_hit_impact(target_node.global_position,-fwd)
 	if combat_feedback:combat_feedback.trigger_hit_feedback(target_node,dmg)
 	apply_camera_recoil(1)
@@ -2003,6 +2066,21 @@ func _try_combat_attack() -> bool:
 
 
 func _start_block() -> bool:
+	if is_ragdoll_active():
+		if ragdoll and ragdoll.has_method("can_wake_up_block") and ragdoll.call("can_wake_up_block"):
+			if is_shield_broken or combat_state == CombatState.DEAD:
+				return false
+			# Wake-up block: cancel knockdown and instantly raise shield to prevent follow-up stuns
+			ragdoll.call("stop_ragdoll")
+			_impact_stun_timer = 0.0
+			_knockback_timer = 0.0
+			velocity = Vector3.ZERO
+			if anim_player and anim_player.has_animation("block_start"):
+				anim_player.speed_scale = 1.6
+				anim_player.play("block_start", 0.05)
+			return transition_to(CombatState.BLOCK)
+		return false
+
 	if is_control_impaired():
 		return false
 	if wizard_combat:
@@ -2048,10 +2126,14 @@ const NO_ATTACKER_POS: Vector3 = Vector3(99999.0, 99999.0, 99999.0)
 
 
 func take_damage(amount_or_payload: Variant, attacker_pos: Vector3 = NO_ATTACKER_POS, incoming_shield_damage: float = 15.0, spawn_feedback: bool = true) -> void:
+	if amount_or_payload is AttackPayload: amount_or_payload.outcome = &"rejected"
 	if wizard_combat and wizard_combat.storm.channeling():
 		return
 	if combat_state == CombatState.DEAD:
 		# TEST 16: No damage can be processed after DEAD
+		return
+	if is_ragdoll_recovering():
+		# Completely invulnerable to damage during get-up recovery
 		return
 
 	var amount: float = 0.0
@@ -2093,6 +2175,7 @@ func take_damage(amount_or_payload: Variant, attacker_pos: Vector3 = NO_ATTACKER
 	# --- DODGE & PERFECT DODGE CHECK ---
 	if is_in_dodge_iframe():
 		if is_dodgeable:
+			if attack_payload is AttackPayload: attack_payload.outcome = &"dodged"
 			# Negate damage & knockback entirely!
 			_knockback_timer = 0.0
 			_knockback_vel = Vector3.ZERO
@@ -2121,12 +2204,15 @@ func take_damage(amount_or_payload: Variant, attacker_pos: Vector3 = NO_ATTACKER
 				combat_feedback.trigger_block_feedback(attacker_pos)
 			return
 
+	var can_block: bool = not attack_payload is AttackPayload or attack_payload.can_be_blocked
 	var final_damage: float = amount
 	var was_blocked: bool = false
-	if combat_state == CombatState.BLOCK and not is_shield_broken and attacker_pos != NO_ATTACKER_POS:
+	if can_block and combat_state == CombatState.BLOCK and not is_shield_broken and attacker_pos != NO_ATTACKER_POS:
 		if combat and combat.is_attack_inside_block_cone(self, attacker_pos, block_cone_deg):
 			was_blocked = true
 			final_damage = amount * (1.0 - block_damage_reduction)
+			if attack_payload is AttackPayload and attack_payload.blocked_damage_override >= 0:
+				final_damage = attack_payload.blocked_damage_override
 			if combat:
 				var to_attacker: Vector3 = attacker_pos - global_position
 				to_attacker.y = 0.0
@@ -2149,13 +2235,20 @@ func take_damage(amount_or_payload: Variant, attacker_pos: Vector3 = NO_ATTACKER
 				combat.trigger_hit_impact(hit_pos, -to_attacker_dir)
 			if spawn_feedback and combat.has_method("spawn_damage_number"):
 				combat.spawn_damage_number(hit_pos, final_damage, false, 0.0)
+		if hero_profile == "archer":
+			trigger_archer_hit_flash()
+
+	last_hit_was_blocked = was_blocked
 
 	if final_damage > 0.0 and archer_combat:
 		archer_combat.end_stealth()
+	if attack_payload is AttackPayload and health_component and not health_component.ability_invulnerable and not health_component.training_invulnerable:
+		attack_payload.outcome = &"blocked" if was_blocked else &"hit"
 	var will_die: bool = (health_component and health_component.current_health - final_damage <= 0.0)
 
 	# Apply hit reaction and knockback only if target survives
-	if not will_die and attacker_pos != NO_ATTACKER_POS:
+	var can_react: bool = not attack_payload is AttackPayload or attack_payload.triggers_hit_reaction or was_blocked
+	if can_react and not will_die and attacker_pos != NO_ATTACKER_POS and not (hawk_carry and hawk_carry.active()):
 		var to_me: Vector3 = global_position - attacker_pos
 		to_me.y = 0.0
 		var hit_dir: Vector3 = to_me.normalized() if to_me.length_squared() > 0.0001 else (-visuals.global_basis.z if visuals else Vector3.BACK)
@@ -2168,12 +2261,12 @@ func take_damage(amount_or_payload: Variant, attacker_pos: Vector3 = NO_ATTACKER
 
 
 func apply_impact_stun(seconds:float) -> bool:
-	if is_dead or not controls_enabled or (wizard_combat and wizard_combat.storm.channeling()):
+	if is_dead or not controls_enabled or (wizard_combat and wizard_combat.storm.channeling()) or is_ragdoll_recovering():
 		return false
-	if polymorph:
+	if polymorph and not is_ragdoll_active():
 		polymorph.cancel_actions()
 	_impact_stun_timer=maxf(_impact_stun_timer,seconds)
-	if anim_player and anim_player.has_animation("recoil"):
+	if not is_ragdoll_active() and anim_player and anim_player.has_animation("recoil"):
 		anim_player.play("recoil",0.04)
 	return true
 
@@ -2182,7 +2275,7 @@ func apply_knockback(direction: Vector3, distance: float, duration: float) -> vo
 	_restore_z_shield_visual(true)
 	if wizard_combat and wizard_combat.storm.channeling():
 		return
-	if combat_state == CombatState.DEAD:
+	if combat_state == CombatState.DEAD or is_ragdoll_recovering():
 		return
 	var flat_dir: Vector3 = direction
 	flat_dir.y = 0.0
@@ -2196,7 +2289,7 @@ func apply_knockback(direction: Vector3, distance: float, duration: float) -> vo
 
 
 func apply_hit_reaction(hit_dir: Vector3, is_blocked_hit: bool = false) -> void:
-	if combat_state == CombatState.DEAD:
+	if combat_state == CombatState.DEAD or is_ragdoll_recovering():
 		return
 	if wizard_combat:
 		wizard_combat.interrupt()
@@ -2207,9 +2300,34 @@ func apply_hit_reaction(hit_dir: Vector3, is_blocked_hit: bool = false) -> void:
 	# Hit reaction clears queued combo input but cannot bypass finisher recovery.
 	reset_combo(false)
 
-	var kb_dist: float = block_recoil_distance if is_blocked_hit else hit_knockback_distance
-	var kb_dur: float = 0.08 if is_blocked_hit else hit_knockback_duration
-	apply_knockback(hit_dir, kb_dist, kb_dur)
+	var has_ability_armor: bool = (
+		active_ability_action != null
+		and active_ability_action.is_active()
+		and active_ability_action.data != null
+		and active_ability_action.data.id in ["shield_charge", "sky_dive", "whirling_blade", "giant_sword_ultimate"]
+	)
+
+	if not is_blocked_hit and hero_profile == "archer":
+		trigger_archer_hit_flash()
+
+	if not is_blocked_hit and not has_ability_armor:
+		if combat_state == CombatState.ATTACK:
+			_attack_impact_applied = false
+			if combat and combat.has_method("stop_slash_effect"):
+				combat.stop_slash_effect()
+			var old_state: CombatState = combat_state
+			combat_state = CombatState.IDLE
+			if anim_player and anim_player.has_animation("idle"):
+				anim_player.speed_scale = 1.0
+				anim_player.play("idle", 0.1)
+			state_changed.emit(old_state, combat_state)
+			_update_locomotion_animations()
+		apply_impact_stun(0.16)
+
+	if not has_ability_armor:
+		var kb_dist: float = block_recoil_distance if is_blocked_hit else hit_knockback_distance
+		var kb_dur: float = 0.08 if is_blocked_hit else hit_knockback_duration
+		apply_knockback(hit_dir, kb_dist, kb_dur)
 
 	# Procedural visual flinch
 	if visuals:
@@ -2272,13 +2390,56 @@ func get_camera_recoil_pitch() -> float:
 	return _cam_recoil_pitch
 
 
-func _update_camera_rotation() -> void:
-	if camera_pivot:
+func _update_camera(_delta: float = 0.0) -> void:
+	if not camera_pivot:
+		return
+
+	if is_third_person:
+		camera_pivot.position = Vector3(0, 1.62, 0)
 		camera_pivot.rotation.y = _camera_yaw
 		camera_pivot.rotation.x = _camera_pitch + _cam_recoil_pitch
+		camera_pivot.rotation.z = 0.0
+		if spring_arm:
+			spring_arm.spring_length = third_person_distance
+			spring_arm.rotation.x = deg_to_rad(-12.0)
+		if camera:
+			camera.rotation = Vector3.ZERO
+	else:
+		if spring_arm:
+			spring_arm.spring_length = 0.0
+			spring_arm.rotation = Vector3.ZERO
+		if camera:
+			camera.position = Vector3.ZERO
+			camera.rotation = Vector3.ZERO
+
+		# 1st-person Eye Position and Rotation Tracking
+		if hero_profile == "archer" and _skeleton and _head_bone_idx != -1:
+			var is_somersault: bool = dodge_controller and dodge_controller.is_dodging
+			if is_somersault:
+				var head_pose: Transform3D = _skeleton.get_bone_global_pose(_head_bone_idx)
+				var head_world: Transform3D = _skeleton.global_transform * head_pose
+				var head_rot: Basis = head_world.basis.orthonormalized()
+				var eye_pos: Vector3 = head_world.origin + head_rot.z * 0.08 + head_rot.y * 0.06
+				var cam_basis: Basis = Basis(-head_rot.x, head_rot.y, -head_rot.z).orthonormalized()
+				var final_basis: Basis = (cam_basis * Basis(Vector3.RIGHT, _camera_pitch + _cam_recoil_pitch)).orthonormalized()
+				camera_pivot.global_transform = Transform3D(final_basis, eye_pos)
+			else:
+				var eye_world: Vector3 = global_position + Vector3(0, 1.58, 0) + Basis(Vector3.UP, _camera_yaw) * Vector3(0, 0, -0.04)
+				var cam_basis: Basis = (Basis(Vector3.UP, _camera_yaw) * Basis(Vector3.RIGHT, _camera_pitch + _cam_recoil_pitch)).orthonormalized()
+				camera_pivot.global_transform = Transform3D(cam_basis, eye_world)
+		else:
+			camera_pivot.position = Vector3(0, 1.62, 0)
+			camera_pivot.rotation.y = _camera_yaw
+			camera_pivot.rotation.x = _camera_pitch + _cam_recoil_pitch
+			camera_pivot.rotation.z = 0.0
+
+
+func _update_camera_rotation() -> void:
+	_update_camera()
 
 
 func apply_shield_damage(amount: float) -> void:
+	if is_ragdoll_recovering(): return
 	if shield_state == ShieldState.BROKEN:
 		return
 	var prev_durability: float = shield_durability
@@ -2372,6 +2533,7 @@ func _restore_shield() -> void:
 
 
 func reset_shield_for_new_round() -> void:
+	if hawk_carry: hawk_carry.clear()
 	if spectacle:
 		spectacle.clear()
 	if frost:
@@ -2444,9 +2606,7 @@ func respawn(spawn_pos: Vector3 = Vector3.ZERO, spawn_yaw: float = 0.0) -> void:
 	global_position = spawn_pos
 	_camera_yaw = spawn_yaw
 	_camera_pitch = 0.0
-	if camera_pivot:
-		camera_pivot.rotation.y = _camera_yaw
-		camera_pivot.rotation.x = _camera_pitch
+	_update_camera()
 	if visuals:
 		visuals.rotation.y = _camera_yaw
 
@@ -2523,7 +2683,10 @@ func _on_animation_finished(anim_name: StringName) -> void:
 
 
 func _update_locomotion_animations() -> void:
-	var dash_presentation: Node = get_node_or_null("KnightDashPresentation")
+	if hawk_carry and hawk_carry.active(): return
+	if is_ragdoll_active():
+		return
+	var dash_presentation: Node = get_node_or_null("KnightDashPresentation") if hero_profile == "knight" else get_node_or_null("ArcherDashPresentation")
 	if dash_presentation and dash_presentation.call("hold_locomotion"):
 		return
 	if active_ability_action and active_ability_action.is_active() and active_ability_action.data and active_ability_action.data.id in ["shield_charge", "sky_dive", "whirling_blade", "giant_sword_ultimate"]:
@@ -2569,6 +2732,7 @@ func _setup_animation_player() -> void:
 			if _skeleton:
 				_head_bone_idx = _skeleton.find_bone("head")
 				_neck_bone_idx = _skeleton.find_bone("neck")
+				if hero_profile == "knight": ensure_ragdoll()
 
 	if anim_player:
 		if hero_profile == "knight":
@@ -2590,8 +2754,12 @@ func _setup_animation_player() -> void:
 			for clip in ["start", "charge", "impact", "stop"]:
 				var resource: Animation = load("res://assets/animations/knight_z_" + clip + ".tres")
 				anim_player.get_animation_library("").add_animation("Knight_Z_" + clip.capitalize(), resource)
+			var get_up_anim: Animation = preload("res://assets/animations/knight_get_up.tres")
+			anim_player.get_animation_library("").add_animation("get_up", get_up_anim)
 		if hero_profile == "knight":
 			preload("res://scripts/KnightHandedness.gd").apply(visuals.get_node("CharacterModel"), anim_player)
+		elif hero_profile == "archer":
+			preload("res://scripts/ArcherLocomotionFix.gd").apply(anim_player)
 		# Configure loop modes for locomotion and combat
 		if anim_player.has_animation("idle"):
 			anim_player.get_animation("idle").loop_mode = Animation.LOOP_LINEAR
@@ -2628,11 +2796,13 @@ func set_third_person(enabled: bool) -> void:
 		spring_arm.spring_length = third_person_distance if is_third_person else 0.0
 		spring_arm.rotation.x = deg_to_rad(-12.0) if is_third_person else 0.0
 	if camera:
-		camera.position = Vector3(0, 0, third_person_distance) if is_third_person else Vector3.ZERO
 		camera.near = 0.05 if is_third_person else 0.08
 		camera.h_offset = 0.0
 		camera.v_offset = 0.0
+		if not is_third_person:
+			camera.position = Vector3.ZERO
 	_update_head_visibility()
+	_update_camera()
 
 
 func _update_head_visibility() -> void:
@@ -2699,7 +2869,46 @@ func _add_mouse_button_if_missing(action: StringName, button_index: MouseButton)
 
 
 func is_control_impaired() -> bool:
-	return _impact_stun_timer>0.0 or (polymorph and polymorph.active()) or (frost and frost.active())
+	return (hawk_carry and hawk_carry.active()) or _impact_stun_timer > 0.0 or (polymorph and polymorph.active()) or (frost and frost.active()) or (ragdoll != null and ragdoll.call("is_active"))
+
+
+func ensure_ragdoll() -> bool:
+	if ragdoll: return true
+	if not _skeleton: return false
+	ragdoll = preload("res://scripts/KnightRagdoll.gd").new()
+	ragdoll.name = "KnightRagdoll"
+	add_child(ragdoll)
+	ragdoll.setup(self, _skeleton)
+	if hero_profile != "knight" and anim_player and not anim_player.has_animation("get_up"):
+		var library := anim_player.get_animation_library("").duplicate() as AnimationLibrary
+		anim_player.remove_animation_library("")
+		anim_player.add_animation_library("", library)
+		var clip := preload("res://assets/animations/knight_get_up.tres").duplicate() as Animation
+		var skeleton_path := anim_player.get_node(anim_player.root_node).get_path_to(_skeleton)
+		for track in range(clip.get_track_count()):
+			var bone := String(clip.track_get_path(track).get_subname(0))
+			clip.track_set_path(track, NodePath(String(skeleton_path) + ":" + bone))
+		library.add_animation("get_up", clip)
+	return true
+
+
+func trigger_ragdoll(impulse: Vector3 = Vector3.ZERO) -> bool:
+	if (hawk_carry and hawk_carry.active()) or is_ragdoll_recovering(): return false
+	if not is_physics_processing():
+		return false
+	if ragdoll:
+		if ragdoll.has_method("is_cc_grace_active") and ragdoll.call("is_cc_grace_active"):
+			return false
+		return ragdoll.call("start_ragdoll", impulse)
+	return false
+
+
+func is_ragdoll_active() -> bool:
+	return ragdoll != null and ragdoll.call("is_active")
+
+
+func is_ragdoll_recovering() -> bool:
+	return ragdoll != null and ragdoll.call("is_recovering")
 
 
 # Analytic smoothstep integral: timestep-independent acceleration and braking.
@@ -2753,3 +2962,141 @@ func _update_sky_dive_thrust_alignment() -> void:
 	var rotation: Basis = Basis(Vector3.RIGHT, correction)
 	var pivot: Vector3 = Vector3(0.0, 1.15, 0.0)
 	model.transform = _sky_dive_model_rest * Transform3D(rotation, pivot - rotation * pivot)
+
+
+func apply_archer_look() -> void:
+	_archer_toon_materials.clear()
+	_cape_material = null
+	_cape_current_drag = Vector3.ZERO
+	_cape_current_tuck = 0.0
+	if not visuals:
+		return
+	var hunter: Node = visuals.get_node_or_null("CharacterModel")
+	if not hunter:
+		return
+	if anim_player:
+		preload("res://scripts/ArcherLocomotionFix.gd").apply(anim_player)
+
+	# Cape remains original static low-poly mesh without vertex flutter or cloth physics
+	var cape_mesh: MeshInstance3D = hunter.find_child("Cape", true, false) as MeshInstance3D
+
+	# Apply toon shader to all other character meshes under CharacterModel
+	for mi: MeshInstance3D in hunter.find_children("*", "MeshInstance3D", true, false):
+		if mi == cape_mesh or not mi.mesh:
+			continue
+		if mi.name.begins_with("@") or mi.name == "HunterBowMesh" or mi.name == "HunterBowString":
+			continue
+		for s in range(mi.mesh.get_surface_count()):
+			var orig = mi.get_active_material(s)
+			var base_color: Color = Color.WHITE
+			if orig is StandardMaterial3D:
+				base_color = orig.albedo_color
+			var toon_mat := ShaderMaterial.new()
+			toon_mat.shader = ARCHER_TOON_SHADER
+			toon_mat.resource_name = "Toon_" + mi.name + "_" + str(s)
+			toon_mat.set_shader_parameter("albedo_color", base_color)
+			toon_mat.set_shader_parameter("shade_floor", 0.32)
+			toon_mat.set_shader_parameter("rim_strength", 0.35)
+			toon_mat.set_shader_parameter("rim_color", Color(1.0, 1.0, 1.0, 1.0))
+			toon_mat.set_shader_parameter("flash_color", Color(0, 0, 0, 0))
+			mi.set_surface_override_material(s, toon_mat)
+			_archer_toon_materials.append(toon_mat)
+
+
+func update_cape(delta: float) -> void:
+	if not _cape_material:
+		return
+	if is_dead or combat_state == CombatState.DEAD:
+		_cape_material.set_shader_parameter("is_dead", true)
+		_cape_material.set_shader_parameter("drag_offset", Vector3.ZERO)
+		_cape_material.set_shader_parameter("flutter_amount", 0.0)
+		return
+
+	_cape_material.set_shader_parameter("is_dead", false)
+
+	# Check dash / dodge state
+	var is_dashing: bool = (
+		combat_state == CombatState.DODGE
+		or (dodge_controller != null and dodge_controller.is_dodging)
+		or (archer_combat != null and archer_combat.dash_active)
+	)
+
+	var target_drag := Vector3.ZERO
+	var target_tuck: float = 0.0
+	var flutter: float = 0.020 # Soothing idle breeze
+	var flutter_spd: float = 3.2
+	var lerp_speed: float = 6.0
+
+	if is_dashing:
+		# Aerodynamic streamline tuck: during high-velocity dodge / somersault / dash,
+		# the cape hugs the back and spine closely rather than billowing outward or flaring overhead.
+		target_drag = Vector3(0.0, 0.0, -0.015)
+		flutter = 0.012
+		flutter_spd = 5.0
+		lerp_speed = 14.0 # Fast response to prevent sudden pop/flare
+
+		# In backflip somersault, compactly curl cape against spine at flip apex
+		if anim_player and anim_player.current_animation == "dash_back":
+			var t: float = anim_player.current_animation_position
+			target_tuck = clampf(1.0 - absf(t - 0.30) / 0.18, 0.0, 1.0)
+	else:
+		var hunter: Node3D = visuals.get_node_or_null("CharacterModel") as Node3D if visuals else null
+		var local_vel: Vector3 = Vector3.ZERO
+		if hunter:
+			local_vel = hunter.global_transform.basis.inverse() * velocity
+
+		var speed: float = Vector2(velocity.x, velocity.z).length()
+		var speed_ratio: float = clampf(speed / 6.0, 0.0, 1.0)
+
+		# 1. Backwards drag: gentle trailing behind runner
+		var forward_ratio: float = clampf(local_vel.z / 6.0, -0.8, 1.0)
+		var target_drag_z: float = -forward_ratio * 0.075
+
+		# 2. Aerodynamic lift: soft upward billow
+		var target_drag_y: float = speed_ratio * 0.025
+		if not is_on_floor() and velocity.y < -2.0:
+			# Freefalling lift
+			target_drag_y += clampf(-velocity.y / 10.0, 0.0, 1.0) * 0.06
+			target_drag_z -= 0.03
+
+		# 3. Lateral strafe / turning sway
+		var target_drag_x: float = -clampf(local_vel.x / 6.0, -1.0, 1.0) * 0.045
+
+		target_drag = Vector3(target_drag_x, target_drag_y, target_drag_z)
+
+		if archer_combat and archer_combat.charging:
+			flutter = 0.012 # Focused tension while drawing bow
+			flutter_spd = 2.4
+		elif speed > 0.4:
+			flutter = lerpf(0.028, 0.042, clampf(speed / 7.0, 0.0, 1.0))
+			flutter_spd = lerpf(4.5, 6.5, clampf(speed / 7.0, 0.0, 1.0))
+
+	_cape_current_drag = _cape_current_drag.lerp(target_drag, minf(1.0, delta * lerp_speed))
+	_cape_current_tuck = lerpf(_cape_current_tuck, target_tuck, minf(1.0, delta * 18.0))
+
+	_cape_material.set_shader_parameter("drag_offset", _cape_current_drag)
+	_cape_material.set_shader_parameter("flutter_amount", flutter)
+	_cape_material.set_shader_parameter("flutter_speed", flutter_spd)
+	_cape_material.set_shader_parameter("somersault_tuck", _cape_current_tuck)
+
+
+func trigger_archer_hit_flash(flash_color: Color = Color(1.0, 0.85, 0.85, 0.8), duration: float = 0.15) -> void:
+	if _hit_flash_tween and _hit_flash_tween.is_valid():
+		_hit_flash_tween.kill()
+	_hit_flash_tween = create_tween()
+	_set_archer_flash_color(flash_color)
+	_hit_flash_tween.tween_method(_set_archer_flash_color, flash_color, Color(0, 0, 0, 0), duration)\
+		.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+
+
+func _set_archer_flash_color(color: Color) -> void:
+	if _cape_material:
+		_cape_material.set_shader_parameter("flash_color", color)
+	for mat in _archer_toon_materials:
+		if is_instance_valid(mat):
+			mat.set_shader_parameter("flash_color", color)
+
+
+func flash_hit() -> void:
+	if hero_profile == "archer":
+		trigger_archer_hit_flash()

@@ -11,6 +11,8 @@ func active() -> bool:
 	return remaining > 0
 
 func begin() -> bool:
+	if actor is PlayerController and actor.is_ragdoll_recovering(): return false
+	if actor.get("hawk_carry") and actor.hawk_carry.active(): return false
 	if active() or actor.polymorph.active() or actor.polymorph.resistance > 0 or actor.polymorph._dead():
 		return false
 	if actor is PlayerController and (not actor.controls_enabled or (actor.wizard_combat and actor.wizard_combat.storm.channeling())):

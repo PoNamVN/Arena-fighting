@@ -14,6 +14,8 @@ func active() -> bool:
 	return remaining > 0.0
 
 func begin() -> bool:
+	if actor is PlayerController and actor.is_ragdoll_recovering(): return false
+	if actor.get("hawk_carry") and actor.hawk_carry.active(): return false
 	if active() or resistance > 0 or _dead():
 		return false
 	if actor.frost.active() or (actor is PlayerController and actor.wizard_combat and actor.wizard_combat.storm.channeling()):
@@ -118,7 +120,7 @@ func cancel_actions() -> void:
 		var old: PlayerController.CombatState = player.combat_state
 		player.combat_state = PlayerController.CombatState.IDLE
 		player.state_changed.emit(old, player.combat_state)
-		if player.anim_player:
+		if player.anim_player and not player.is_ragdoll_active():
 			player.anim_player.play("idle")
 	elif actor is TrainingDummy:
 		actor.is_blocking = false

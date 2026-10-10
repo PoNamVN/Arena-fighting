@@ -60,7 +60,7 @@ func _run() -> void:
 	var bow: ArcherCombat = player.archer_combat
 	check(bow != null and enemy.archer_combat == null, "Archer kit isolated from Knight")
 	check(player.anim_player.has_animation("run") and player._skeleton.get_bone_count() == 18, "Separate hunter model preserves locomotion and rig")
-	check(player.ability_system.get_ability("skill_1").id == "archer_rapid_volley" and player.ability_system.get_ability("ultimate").id == "archer_trex_bait", "Archer loadout cannot cast Knight skills")
+	check(player.ability_system.get_ability("skill_1").id == "archer_hawk_fish" and player.ability_system.get_ability("ultimate").id == "archer_trex_bait", "Archer loadout cannot cast Knight skills")
 	check(player._start_block() and is_equal_approx(player.block_damage_reduction, 0.65), "Archer guards with weaker bow block")
 	player._release_block()
 	action("attack", true)

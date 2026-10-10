@@ -374,6 +374,70 @@ func _run_tests() -> void:
 		"Child count before=%d, after=%d (Strictly stable)" % [combat_children_count, combat_children_after])
 
 	# -----------------------------------------------------------------
+	# TEST 23: Unblocked hit applies impact stun and impairs control
+	# -----------------------------------------------------------------
+	p.global_position = Vector3(0, 0, 0)
+	p.velocity = Vector3.ZERO
+	p.health_component.reset_health()
+	p.transition_to(PlayerController.CombatState.IDLE)
+	await process_frame
+
+	ad.call("trigger_attack_now")
+	await p.hit_reacted
+
+	var stun_timer_after_hit: float = p.get("_impact_stun_timer")
+	var was_impaired: bool = p.is_control_impaired()
+	await create_timer(0.20).timeout
+	await process_frame
+	var stun_timer_recovered: float = p.get("_impact_stun_timer")
+	var is_impaired_after: bool = p.is_control_impaired()
+
+	var t23_pass: bool = stun_timer_after_hit > 0.05 and was_impaired and (stun_timer_recovered == 0.0) and (not is_impaired_after)
+	_record_result("TEST 23: Unblocked hit applies impact stun and impairs control", t23_pass,
+		"Hit stun timer: %.2fs (impaired=%s) -> recovered: %.2fs (impaired=%s)" % [stun_timer_after_hit, was_impaired, stun_timer_recovered, is_impaired_after])
+
+	# -----------------------------------------------------------------
+	# TEST 24: Unblocked hit interrupts active player attack
+	# -----------------------------------------------------------------
+	p.global_position = Vector3(0, 0, 0)
+	p.velocity = Vector3.ZERO
+	p.health_component.reset_health()
+	p.transition_to(PlayerController.CombatState.IDLE)
+	await process_frame
+
+	p._try_combat_attack()
+	await process_frame
+	var was_attacking_mid_swing: bool = (p.combat_state == PlayerController.CombatState.ATTACK)
+
+	p.apply_hit_reaction(Vector3.BACK, false)
+
+	var state_after_interrupt: PlayerController.CombatState = p.combat_state
+	var combo_step_after: int = p.get_combo_step()
+	var t24_pass: bool = was_attacking_mid_swing and (state_after_interrupt == PlayerController.CombatState.IDLE) and (combo_step_after == 0) and p.is_control_impaired()
+	_record_result("TEST 24: Unblocked hit interrupts active player attack", t24_pass,
+		"Attacking=%s -> Interrupted state=%d (Expected IDLE=0), Combo step=%d" % [was_attacking_mid_swing, state_after_interrupt, combo_step_after])
+
+	await create_timer(0.20).timeout
+	await process_frame
+
+	# -----------------------------------------------------------------
+	# TEST 25: Blocked hit does NOT apply impact stun
+	# -----------------------------------------------------------------
+	p.global_position = Vector3(0, 0, 0)
+	p.velocity = Vector3.ZERO
+	p.health_component.reset_health()
+	p.reset_shield_durability()
+	p.transition_to(PlayerController.CombatState.BLOCK)
+	await process_frame
+
+	p.apply_hit_reaction(Vector3.BACK, true)
+	var blocked_stun_timer: float = p.get("_impact_stun_timer")
+	var blocked_impaired: bool = p.is_control_impaired()
+	var t25_pass: bool = (blocked_stun_timer == 0.0) and (not blocked_impaired)
+	_record_result("TEST 25: Blocked hit does NOT apply impact stun", t25_pass,
+		"Blocked stun timer=%.2fs (impaired=%s, Expected 0.0/false)" % [blocked_stun_timer, blocked_impaired])
+
+	# -----------------------------------------------------------------
 	# SUMMARY
 	# -----------------------------------------------------------------
 	var total_tests: int = _test_results.size()

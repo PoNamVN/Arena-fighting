@@ -120,6 +120,9 @@ func _schedule_finish() -> void:
 	_result_player_hp=player.health_component.current_health
 	_result_opponent_hp=opponent.health_component.current_health
 	round_state=RoundState.ENDING
+	for victim: PlayerController in [player, opponent]:
+		if victim.hawk_carry: victim.hawk_carry.clear()
+		if victim.archer_combat: victim.archer_combat.hawk_skill.stop()
 	brain.enabled=false
 	center_label.hide()
 	_finish_started_usec=Time.get_ticks_usec()
@@ -139,6 +142,8 @@ func _finishing_presentation_busy() -> bool:
 	for actor:PlayerController in [player,opponent]:
 		if actor.is_dead:
 			continue
+		if actor.is_ragdoll_active():
+			return true
 		if actor.active_ability_action and actor.active_ability_action.is_active():
 			return true
 		if actor.combat_state in [PlayerController.CombatState.ATTACK,PlayerController.CombatState.COUNTER]:
@@ -259,6 +264,8 @@ func _prepare_scene_exit() -> void:
 			actor.wizard_combat.reset()
 		if actor.archer_combat:
 			actor.archer_combat.reset()
+		if actor.ragdoll and actor.ragdoll.call("is_active"):
+			actor.ragdoll.call("stop_ragdoll")
 	CombatTimeManager.reset_time()
 
 

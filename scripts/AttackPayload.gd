@@ -10,6 +10,10 @@ var is_dodgeable: bool = true
 var is_perfect_dodge_eligible: bool = true
 var stamina_reward: float = 25.0
 var can_be_blocked: bool = true
+var triggers_hit_reaction: bool = true
+var blocked_damage_override: float = -1.0
+# Set by the receiver during this hit; chip damage is not proof of a direct hit.
+var outcome: StringName = &"rejected"
 var knockback_distance: float = 0.40
 var knockback_duration: float = 0.15
 var vfx_type: String = "hit"

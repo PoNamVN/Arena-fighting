@@ -5,6 +5,7 @@ const PooledEffect = preload("res://scripts/vfx/PooledVFX.gd")
 const COMMON_LIBRARY = preload("res://vfx/common/library.tres")
 const COMMON_MULTIPLIERS: Array[float] = [0.5, 1.0, 1.2]
 const DEFAULT_LIBRARY = preload("res://vfx/vfx_library.tres")
+const HAWK_LIBRARY = preload("res://vfx/archer/hawk_library.tres")
 enum Quality { LOW, MEDIUM, HIGH }
 const MULTIPLIERS: Array[float] = [0.5, 0.75, 1.0]
 
@@ -55,6 +56,8 @@ func _ready() -> void:
 	add_child(_pool_root)
 	get_tree().node_added.connect(_on_node_added)
 	for definition: Resource in DEFAULT_LIBRARY.definitions:
+		register_definition(definition)
+	for definition: Resource in HAWK_LIBRARY.definitions:
 		register_definition(definition)
 	for definition: Resource in COMMON_LIBRARY.definitions:
 		var authored := definition.duplicate()

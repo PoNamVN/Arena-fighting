@@ -21,6 +21,7 @@ extends StaticBody3D
 @export var hit_knockback_duration: float = 0.10
 @export var block_recoil_distance: float = 0.08
 
+var hawk_carry: HawkCarryEffect
 var frost: FreezeEffect
 var polymorph: PolymorphEffect
 var _knockback_tween: Tween = null
@@ -79,6 +80,9 @@ var _initial_transform: Transform3D
 
 
 func _ready() -> void:
+	hawk_carry = HawkCarryEffect.new()
+	hawk_carry.actor = self
+	add_child(hawk_carry)
 	polymorph = PolymorphEffect.new()
 	polymorph.actor = self
 	add_child(polymorph)
@@ -165,7 +169,7 @@ func take_damage(amount: float, attacker_pos: Vector3 = NO_ATTACKER_POS, was_blo
 	if health_component:
 		health_component.take_damage(amount)
 
-	if not will_die and attacker_pos != NO_ATTACKER_POS:
+	if not will_die and attacker_pos != NO_ATTACKER_POS and not hawk_carry.active():
 		var to_me: Vector3 = global_position - attacker_pos
 		to_me.y = 0.0
 		var hit_dir: Vector3 = to_me.normalized() if to_me.length_squared() > 0.0001 else Vector3.BACK
@@ -265,6 +269,7 @@ func _on_died() -> void:
 
 
 func reset_dummy() -> void:
+	if hawk_carry: hawk_carry.clear()
 	if frost:
 		frost.clear()
 	if polymorph:

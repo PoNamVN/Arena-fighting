@@ -105,7 +105,7 @@ func _process(_delta: float) -> void:
 		status_label.text = "CUNG BỊ BẬT · %.1fs" % player.shield_recovery_time_remaining if player.is_shield_broken else "CUNG THỦ RỪNG"
 		var cooldown: float = player.ability_system.get_cooldown_remaining("skill_1")
 		var z_status: String = "%.1fs" % cooldown if cooldown > 0 else ("Sẵn sàng" if player.stamina_component.has_enough_stamina(25.0) else "Thiếu năng lượng")
-		abilities_label.text = "Z Loạt tên: %s · 25 NL" % z_status
+		abilities_label.text = "Z Mồi cá — Diều hâu: %s · 25 NL" % z_status
 		for slot: String in ["skill_2", "skill_3"]:
 			var ability: AbilityData = player.ability_system.get_ability(slot)
 			var remaining: float = player.ability_system.get_cooldown_remaining(slot)

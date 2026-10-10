@@ -1,5 +1,18 @@
 # AI Handoff Documentation
 
+**Main project sync 2026-10-10:** Archer Z has now been merged into `D:/Game 3D/Game_3D`, the project actually launched by Godot. See [ARCHER_Z_MAIN_SYNC.md](ARCHER_Z_MAIN_SYNC.md) for verification and restart instructions.
+
+## Latest checkpoint — 2026-10-10: Archer fish/hawk Z
+
+Revision 4 supersedes the landing-only ragdoll below: ragdoll starts as soon as the hawk lifts the grabbed ankles. HawkGripBone pins both shins inside force integration, joints simulate other limbs; hawk talons align to physical ankle positions rather than SkeletonModifier's restored animation pose. Release unpins the legs without restarting simulation; carry suppresses the automatic recovery watchdog until landing. Cleanup stops ragdoll on cancellation. Updated files live in the main D:/Game 3D/Game_3D project. See ARCHER_Z_MAIN_SYNC.md for current tests.
+
+Main-project revision 3: 5.5m radius / 2.2s orbit, 3.5m/s horizontal throw, physical ragdoll on landing and forced automatic get-up for Knight/Archer/Wizard. Get-up lasts the actual clip length (0.85s) and rejects HP/shield damage, freeze, polymorph, stun, knockback and re-ragdoll. Reuses KnightRagdoll and retargets the existing get_up clip lazily for other hero rigs. Restores camera offset after recovery. Total Z damage remains 24, energy 25, cooldown 24s. Dummy has no humanoid ragdoll rig. Current verification and main-root restart instructions are in ARCHER_Z_MAIN_SYNC.md; worktree gameplay files do not include the main project's newer Knight ragdoll infrastructure.
+
+Archer Z now fires one homing fish arrow. Frontal block cancels capture; a direct hit triggers a rigged hawk dive, inverted ankle carry at 14m, full horizontal circle and physical drop (4 + up to 20 damage, 25 stamina, 24s cooldown). Shared carry locks hero/dummy controls, respects walls/bounds, and cleans up on death/reset/round end. Authored Blender source, two GLBs, six bird animations, pooled VFX and synthesized audio are included. Revision 2 rebuilds the hawk with 2,880 triangles, one skinned mesh and layered feathers; phased wing flaps use the existing 23-bone rig. Victim FPS rolls upside down during capture and restores on release/reset, excluding nearby geometry only in that camera.
+
+See [ARCHER_Z_HAWK_IMPLEMENTATION.md](ARCHER_Z_HAWK_IMPLEMENTATION.md) for current validation and remaining playtest limits. Earlier checkpoints describe historical states.
+
+
 ## Latest checkpoint — 2026-10-03: Combat spectacle for all three heroes
 
 User requested a much stronger animation/VFX upgrade with performance kept in mind.
