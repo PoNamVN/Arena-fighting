@@ -1,5 +1,7 @@
 # AI Handoff Documentation
 
+**Git housekeeping 2026-10-10:** Local Godot executable, Python caches, backup models/source and scratch experiments are ignored and remain on disk. The three current hawk documentation images and `scratch/test_fp_and_sidedash.gd` are versioned. Run the FPS/side-dash check with Godot `--headless --fixed-fps 60 --path . --script scratch/test_fp_and_sidedash.gd`; assertions passed and exit was 0 (existing dummy-renderer mesh cleanup errors remain).
+
 **PNG cleanup 2026-10-10:** Old generated PNG previews referenced in historical checkpoints were removed. Runtime UI icons and the three current hawk documentation previews remain. Render/test scripts can regenerate historical previews; scratch PNGs are now ignored by default.
 
 **Main project sync 2026-10-10:** Archer Z has now been merged into `D:/Game 3D/Game_3D`, the project actually launched by Godot. See [ARCHER_Z_MAIN_SYNC.md](ARCHER_Z_MAIN_SYNC.md) for verification and restart instructions.

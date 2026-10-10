@@ -39,12 +39,24 @@ runtime_screenshot.png.import
 .env.*
 *.secret
 
-# Generated test PNGs; keep the three current hawk documentation previews.
-/scratch/*.png
-/scratch/*.png.import
+
+# Local editor binary, caches, model experiments and source backups.
+/Godot.exe
+__pycache__/
+*.pyc
+*.bak
+*.backup
+*.backup2
+/assets/models/*_backup.glb
+/assets/models/*_backup.glb.import
+/assets/models/m_archer_preview/
+
+# Scratch experiments stay local; tracked fixtures remain tracked.
+/scratch/*
 !/scratch/hawk_phase_3.png
 !/scratch/hawk_phase_3.png.import
 !/scratch/hawk_gameplay_tps.png
 !/scratch/hawk_gameplay_tps.png.import
 !/scratch/hawk_victim_fps.png
 !/scratch/hawk_victim_fps.png.import
+!/scratch/test_fp_and_sidedash.gd
