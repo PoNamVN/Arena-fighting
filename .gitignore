@@ -38,3 +38,13 @@ runtime_screenshot.png.import
 .env
 .env.*
 *.secret
+
+# Generated test PNGs; keep the three current hawk documentation previews.
+/scratch/*.png
+/scratch/*.png.import
+!/scratch/hawk_phase_3.png
+!/scratch/hawk_phase_3.png.import
+!/scratch/hawk_gameplay_tps.png
+!/scratch/hawk_gameplay_tps.png.import
+!/scratch/hawk_victim_fps.png
+!/scratch/hawk_victim_fps.png.import

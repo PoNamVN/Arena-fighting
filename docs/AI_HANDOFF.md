@@ -1,5 +1,7 @@
 # AI Handoff Documentation
 
+**PNG cleanup 2026-10-10:** Old generated PNG previews referenced in historical checkpoints were removed. Runtime UI icons and the three current hawk documentation previews remain. Render/test scripts can regenerate historical previews; scratch PNGs are now ignored by default.
+
 **Main project sync 2026-10-10:** Archer Z has now been merged into `D:/Game 3D/Game_3D`, the project actually launched by Godot. See [ARCHER_Z_MAIN_SYNC.md](ARCHER_Z_MAIN_SYNC.md) for verification and restart instructions.
 
 ## Latest checkpoint — 2026-10-10: Archer fish/hawk Z
