@@ -4,6 +4,7 @@ extends Node
 ## Forest hunter: charged bow shots, homing fish/hawk Z, seeking X and forest escape.
 const MAX_CHARGE: float = 1.2
 const RANGE: float = 24.0
+const CARRIED_ARROW_SPEED_RATIO := .9
 const RECOVERY: float = 0.40
 const COUNTER_RETREAT_DISTANCE: float = 3.2
 const COUNTER_RETREAT_DURATION: float = 0.32
@@ -280,7 +281,7 @@ func _can_skill() -> bool:
 func start_seeking() -> bool:
 	if not _can_skill():
 		return false
-	var target: Node3D = _find_target()
+	var target: Node3D = _find_seeking_target()
 	# Do not spend a targeting skill on empty space or through a wall.
 	if not is_instance_valid(target) or not actor.ability_system.cast_ability("skill_2"):
 		return false
@@ -291,6 +292,15 @@ func start_seeking() -> bool:
 	seeking_elapsed = 0.0
 	seeking_shots = 0
 	return true
+
+func _find_seeking_target() -> Node3D:
+	# Z already marked this enemy: X may keep that lock above or behind the caster.
+	var carried := hawk_skill.target
+	if _homing_target_alive(carried) and carried.get("hawk_carry") and carried.hawk_carry.active():
+		var ray := PhysicsRayQueryParameters3D.create(actor.global_position + Vector3.UP * 1.35, carried.global_position + Vector3.UP * .9, 1)
+		ray.exclude = [actor.get_rid(), (carried as CollisionObject3D).get_rid()]
+		if actor.get_world_3d().direct_space_state.intersect_ray(ray).is_empty(): return carried
+	return _find_target()
 
 func start_escape() -> bool:
 	# C can cancel charge/Z/guard, but not dodge, Counter or hit stun.
@@ -624,15 +634,27 @@ func _physics_process(delta: float) -> void:
 			var dt: float = delta / float(step_count)
 			var tracking: Variant = data.get("homing", null)
 			var target: Node3D = tracking if is_instance_valid(tracking) else null
+			var held := false
 			if _homing_target_alive(target):
 				data.goal = target.global_position + Vector3(0, 0.9, 0)
+				var aerial: bool = target.get("hawk_carry") != null and target.hawk_carry.phase in [HawkCarryEffect.Phase.LIFT, HawkCarryEffect.Phase.CARRY]
+				held = aerial
+				if aerial:
+					var carry: HawkCarryEffect = target.hawk_carry
+					data.speed = TAU * carry.orbit_radius * HawkCarryEffect.ORBIT_SPEED_MULTIPLIER / HawkCarryEffect.CIRCLE_SECONDS * CARRIED_ARROW_SPEED_RATIO
+					data.flight_range = data.speed * (HawkCarryEffect.CIRCLE_SECONDS + 4.0)
+					data.follow_until_drop = true
+					if carry.phase == HawkCarryEffect.Phase.CARRY:
+						# Chase behind the hawk instead of cutting across its orbit into the victim.
+						data.goal = carry.orbit_position(maxf(0, carry.elapsed - .4 - data.age * (1.0 - CARRIED_ARROW_SPEED_RATIO))) + Vector3.UP * .9
 				var desired: Vector3 = (data.goal - data.guide).normalized()
 				var angle: float = data.direction.angle_to(desired)
-				data.direction = data.direction.slerp(desired, minf(1.0, deg_to_rad(110.0) * dt / maxf(angle, 0.001))).normalized()
+				data.direction = data.direction.slerp(desired, minf(1.0, deg_to_rad(1080.0 if data.get("follow_until_drop", false) else 110.0) * dt / maxf(angle, 0.001))).normalized()
 			else:
 				data.homing = null
 			var from: Vector3 = node.global_position
-			var travel: float = minf(data.speed * dt, RANGE - float(data.distance))
+			var flight_range: float = data.get("flight_range", RANGE)
+			var travel: float = minf(data.speed * dt, flight_range - float(data.distance))
 			data.distance += travel
 			data.age += dt
 			var to: Vector3 = from + data.direction * travel
@@ -650,6 +672,8 @@ func _physics_process(delta: float) -> void:
 				to = data.guide + (right * cos(phase) + up * sin(phase)) * radius
 			var query: PhysicsRayQueryParameters3D = PhysicsRayQueryParameters3D.create(from, to, 1 | actor.combat.target_collision_mask)
 			query.exclude = [actor.get_rid()]
+			# Z owns the held victim; X can hit it once release begins the fall.
+			if held: query.exclude = [actor.get_rid(), (target as CollisionObject3D).get_rid()]
 			hit = actor.get_world_3d().direct_space_state.intersect_ray(query)
 			incoming = from
 			if not hit.is_empty():
@@ -659,13 +683,13 @@ func _physics_process(delta: float) -> void:
 			node.global_position = to
 			if data.spiral:
 				_draw_spiral_trail(data, from, to)
-			if data.distance >= RANGE:
+			if data.distance >= flight_range:
 				break
 		if not hit.is_empty():
 			_impact(hit.collider, data.damage, incoming, hit.position, data.basic, data.shield_damage)
 			node.queue_free()
 			_arrows.remove_at(i)
-		elif data.distance >= RANGE:
+		elif data.distance >= float(data.get("flight_range", RANGE)):
 			node.queue_free()
 			_arrows.remove_at(i)
 

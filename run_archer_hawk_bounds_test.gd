@@ -37,8 +37,10 @@ func _run() -> void:
 		var proxy_outside := 0.0
 		var bones_outside := 0.0
 		var escaped_phases: Dictionary = {}
+		var carry_ticks := 0
 		for tick in range(900):
 			await frames(1)
+			if enemy.hawk_carry.phase == HawkCarryEffect.Phase.CARRY: carry_ticks += 1
 			var positions: Array[Vector3] = [enemy.global_position]
 			if enemy.is_ragdoll_active() and enemy.ragdoll.simulator.is_simulating_physics():
 				for bone: PhysicalBone3D in enemy.ragdoll.physical_bones.values():
@@ -52,6 +54,8 @@ func _run() -> void:
 					if excess > .02: escaped_phases[enemy.hawk_carry.phase] = true
 		print(profile + " wall %d: proxy excess=%.3f, bone excess=%.3f, phases=%s" % [side, proxy_outside, bones_outside, escaped_phases])
 		check(proxy_outside < .02, "Player collider stays inside wall %d" % side)
+		check(carry_ticks >= 479, "Wall %d capture keeps the full eight-second arena flight" % side)
+		check(enemy.hawk_carry.orbit_radius > 18, "Wall %d capture uses the arena-wide orbit" % side)
 		check(bones_outside < .02, "Physical victim stays inside wall %d through carry, fall and recovery" % side)
 		check(bow.hawk_skill.grabs == 1 and bow.hawk_skill.landings == 1 and not enemy.hawk_carry.active() and not enemy.is_ragdoll_active(), "Wall %d capture lands and finishes get-up" % side)
 	arena.queue_free()

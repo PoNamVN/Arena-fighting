@@ -55,7 +55,9 @@ func _run() -> void:
 					limb_motion = maxf(limb_motion, enemy.ragdoll.physical_bones["forearm.L"].angular_velocity.length())
 			if bow.hawk_skill.landings > 0 and not landed:
 				landed = true
-				check(enemy.global_position.z > -3, profile + " is thrown horizontally before landing")
+				var release_point := enemy.hawk_carry.orbit_position(HawkCarryEffect.CIRCLE_SECONDS)
+				var tangent := Vector3(-sin(enemy.hawk_carry.orbit_angle), 0, cos(enemy.hawk_carry.orbit_angle))
+				check((enemy.global_position - release_point).dot(tangent) > 2, profile + " is thrown horizontally along the arena orbit's release tangent before landing")
 				check(enemy.is_ragdoll_active() and not enemy.hawk_carry.active(), profile + " hands carry movement to a physical ragdoll on impact")
 				check(not enemy._start_block(), profile + " cannot skip its forced knockdown/get-up")
 			if enemy.is_ragdoll_active():

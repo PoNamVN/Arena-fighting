@@ -39,7 +39,7 @@ func _run() -> void:
 	check(not skill.active() and not enemy.hawk_carry.active(), "Hawk exits and victim control restores")
 	check(absf(enemy.health_component.current_health - 476) < .1, "Arrow four plus landing twenty damage once")
 	check(skill.landings == 1 and enemy.hawk_carry.fall_hits == 1, "Landing damage applies exactly once")
-	check(absf(enemy.hawk_carry.orbit_angle - TAU) < .01, "Unobstructed carry completes a full circle")
+	check(absf(enemy.hawk_carry.orbit_angle - enemy.hawk_carry.orbit_start_angle - TAU * HawkCarryEffect.ORBIT_SPEED_MULTIPLIER) < .01, "Unobstructed carry completes six arena-wide orbits over eight seconds")
 	check(enemy.global_position.y < .15 and player.stamina_component.current_stamina == 75, "Victim lands; skill generates no basic energy")
 	check(player.ability_system.get_cooldown_remaining("skill_1") > 10, "Long cooldown still prevents spam after the entire high carry finishes")
 	check(bow.start_charge() and not bow.start_hawk(), "Basic resumes while Z remains on cooldown")

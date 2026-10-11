@@ -5,6 +5,9 @@ enum Phase { IDLE, MARKED, LIFT, CARRY, FALL, RECOVER }
 const HEIGHT := 14.0
 const LIFT_SECONDS := 1.1
 const CIRCLE_SECONDS := 8.0
+const ORBIT_SPEED_MULTIPLIER := 6.0
+const ORBIT_ENTRY_SECONDS := .8
+const ARENA_ORBIT_MARGIN := 1.5
 const INVERT_SECONDS := .45
 const RADIUS := 5.5
 const THROW_SPEED := 3.5
@@ -18,6 +21,8 @@ var center := Vector3.ZERO
 var fall_start := 0.0
 var fall_hits := 0
 var orbit_angle := 0.0
+var orbit_radius := RADIUS
+var orbit_start_angle := 0.0
 var _fall_velocity := 0.0
 var _throw_velocity := Vector3.ZERO
 var _visuals: Node3D
@@ -47,10 +52,23 @@ func begin(caster: Node) -> bool:
 	source = caster
 	origin = actor.global_position
 	center = origin - Vector3(RADIUS, 0, 0)
+	orbit_radius = RADIUS
+	orbit_start_angle = 0.0
+	var bounds := actor.get_parent().find_child("ArenaPlayBounds", true, false)
+	if bounds and not bounds._limits.is_empty():
+		# Use the arena's full safe inscribed circle rather than a circle beside the victim.
+		center = bounds.global_position
+		center.y = origin.y
+		orbit_radius = INF
+		for limit: float in bounds._limits:
+			orbit_radius = minf(orbit_radius, limit - ARENA_ORBIT_MARGIN)
+		orbit_radius = maxf(.5, orbit_radius)
+		var radial := origin - center
+		orbit_start_angle = atan2(radial.z, radial.x)
 	elapsed = 0
 	total_elapsed = 0
 	fall_hits = 0
-	orbit_angle = 0
+	orbit_angle = orbit_start_angle
 	inversion = 0
 	_fall_velocity = 0
 	_throw_velocity = Vector3.ZERO
@@ -82,6 +100,12 @@ func begin(caster: Node) -> bool:
 		_visual_rest = _visuals.transform
 	phase = Phase.MARKED
 	return true
+
+func orbit_position(at_seconds: float) -> Vector3:
+	var angle := orbit_start_angle + TAU * ORBIT_SPEED_MULTIPLIER * clampf(at_seconds / CIRCLE_SECONDS, 0, 1)
+	var goal := center + Vector3(cos(angle) * orbit_radius, HEIGHT, sin(angle) * orbit_radius)
+	# Enter the broad flight path continuously from the capture position.
+	return (origin + Vector3.UP * HEIGHT).lerp(goal, smoothstep(0, ORBIT_ENTRY_SECONDS, at_seconds))
 
 func _dead() -> bool:
 	return not is_instance_valid(actor) or (actor.is_dead if actor is PlayerController else actor.is_dead())
@@ -139,8 +163,8 @@ func step(delta: float) -> void:
 			elif elapsed >= LIFT_SECONDS:
 				_set_phase(Phase.CARRY)
 		Phase.CARRY:
-			orbit_angle = TAU * minf(1, elapsed / CIRCLE_SECONDS)
-			var goal := center + Vector3(cos(orbit_angle) * RADIUS, HEIGHT, sin(orbit_angle) * RADIUS)
+			orbit_angle = orbit_start_angle + TAU * ORBIT_SPEED_MULTIPLIER * minf(1, elapsed / CIRCLE_SECONDS)
+			var goal := orbit_position(elapsed)
 			if not _move_to(goal) or elapsed >= CIRCLE_SECONDS: _start_fall()
 		Phase.FALL:
 			_fall_velocity -= (actor.gravity if actor is PlayerController else 24.0) * delta

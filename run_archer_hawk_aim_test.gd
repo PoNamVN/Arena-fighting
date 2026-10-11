@@ -71,8 +71,7 @@ func _run() -> void:
 	var point := enemy.global_position + Vector3.UP * .9
 	for i in range(6):
 		var flight := origin.distance_to(point) / 34.0
-		var angle := TAU * (enemy.hawk_carry.elapsed + flight) / HawkCarryEffect.CIRCLE_SECONDS
-		point = enemy.hawk_carry.center + Vector3(cos(angle) * HawkCarryEffect.RADIUS, HawkCarryEffect.HEIGHT + .9, sin(angle) * HawkCarryEffect.RADIUS)
+		point = enemy.hawk_carry.orbit_position(enemy.hawk_carry.elapsed + flight) + Vector3.UP * .9
 	player.camera.look_at(point)
 	var direction := bow._manual_aim_direction()
 	check(bow.release_arrow() and bow._arrows[0].direction.is_equal_approx(direction) and bow._arrows[0].homing == null, "FPS release uses the manual sightline with no homing")
