@@ -31,6 +31,9 @@ var _wing_positions: Array[Vector3] = []
 var _wing_index := 0
 var _wing_count := 0
 var _rebound_origin := Vector3.ZERO
+var _fish_ring: MeshInstance3D
+var _fish_ring_material: StandardMaterial3D
+var _dive_gust_spawned := false
 
 func _ready() -> void:
 	_cry = _sound("res://assets/audio/hawk_z_cry.wav", -13)
@@ -55,7 +58,6 @@ func begin() -> bool:
 	var candidate := actor.archer_combat._find_target()
 	if not is_instance_valid(candidate) or not candidate.get("hawk_carry") or not candidate.hawk_carry.eligible(): return false
 	if not actor.ability_system.cast_ability("skill_1"): return false
-	actor.archer_combat.end_stealth()
 	target = candidate
 	phase = Phase.STARTUP
 	elapsed = 0
@@ -225,6 +227,7 @@ func _impact(receiver: Object, incoming: Vector3, point: Vector3) -> void:
 		else:
 			stop()
 		return
+	actor.archer_combat.end_stealth()
 	capture = receiver.hawk_carry
 	grabs += 1
 	projectile.global_position = receiver.global_position + Vector3.UP * 1.35
@@ -240,7 +243,12 @@ func _impact(receiver: Object, incoming: Vector3, point: Vector3) -> void:
 	if _animation and _animation.has_animation("carry_flap"):
 		_animation.get_animation("carry_flap").loop_mode = Animation.LOOP_LINEAR
 	for i in range(2):
-		_wing_trails.append(_new_trail(hawk))
+		var wind_trail := _new_trail(hawk)
+		var wind_mesh := wind_trail.multimesh.mesh as CylinderMesh
+		wind_mesh.top_radius = .07
+		wind_mesh.bottom_radius = .025
+		(wind_trail.material_override as StandardMaterial3D).albedo_color = Color(.7, .9, 1, .65)
+		_wing_trails.append(wind_trail)
 		_wing_positions.append(Vector3.ZERO)
 	_wing_index = 0
 	_wing_count = 0
@@ -249,19 +257,61 @@ func _impact(receiver: Object, incoming: Vector3, point: Vector3) -> void:
 		for mesh: GeometryInstance3D in visual.find_children("*", "GeometryInstance3D", true, false):
 			mesh.layers = HawkCarryEffect.CARRIED_BODY_LAYER
 	_trail.hide()
-	_play_hawk("dive")
+	_create_fish_ring()
+	_dive_gust_spawned = false
+	hawk.hide()
 	_cry.global_position = receiver.global_position + Vector3.UP * 7
 	_cry.play()
-	_effect(&"HawkMark", receiver.global_position, {"follow": receiver, "follow_offset": Transform3D(Basis.IDENTITY, Vector3(0, 1.8, 0)), "mark": true, "color": Color(1, .7, .2, .8)})
 	_update_hawk()
+
+func _create_fish_ring() -> void:
+	_fish_ring = MeshInstance3D.new()
+	var ring := TorusMesh.new()
+	ring.inner_radius = .97
+	ring.outer_radius = 1.025
+	ring.rings = 64
+	ring.ring_segments = 6
+	_fish_ring.mesh = ring
+	_fish_ring.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	_fish_ring.layers = HawkCarryEffect.CARRIED_BODY_LAYER
+	_fish_ring_material = StandardMaterial3D.new()
+	_fish_ring_material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	_fish_ring_material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	_fish_ring_material.albedo_color = Color(.05, .55, 1, .85)
+	_fish_ring_material.emission_enabled = true
+	_fish_ring_material.emission = Color(.05, .4, 1)
+	_fish_ring_material.emission_energy_multiplier = 2.0
+	_fish_ring.material_override = _fish_ring_material
+	actor.add_child(_fish_ring)
+	_fish_ring.top_level = true
 
 func _update_hawk() -> void:
 	var y := 2.3
+	var dive_progress := 1.0
 	if capture.phase == HawkCarryEffect.Phase.MARKED:
-		y += 7 * (1 - smoothstep(0, 1, minf(1, capture.elapsed / .35)))
+		var swim_seconds := HawkCarryEffect.MARK_SECONDS - HawkCarryEffect.DIVE_SECONDS
+		dive_progress = clampf((capture.elapsed - swim_seconds) / HawkCarryEffect.DIVE_SECONDS, 0, 1)
+		if capture.elapsed >= swim_seconds and not hawk.visible: _play_hawk("dive")
+		y += 7 * (1 - smoothstep(0, 1, dive_progress))
+		hawk.visible = capture.elapsed >= swim_seconds
+		var fish_angle := TAU * capture.elapsed / swim_seconds
+		var fish_center := capture.actor.global_position + Vector3.UP * 1.05
+		projectile.global_position = fish_center + Vector3(cos(fish_angle), sin(fish_angle * 2) * .08, sin(fish_angle))
+		projectile.look_at(projectile.global_position + Vector3(-sin(fish_angle), 0, cos(fish_angle)))
+		if _fish_tail: _fish_tail.rotation.y = sin(capture.elapsed * 38) * .3
+		_fish_ring.global_position = fish_center
+		_fish_ring.visible = get_tree().root.get_node("VFXManager").enabled
+		_fish_ring_material.albedo_color.a = .25 + .65 * (.5 + .5 * sin(capture.elapsed * TAU * 8))
+		if dive_progress >= .75 and not _dive_gust_spawned:
+			_dive_gust_spawned = true
+			_effect(&"HawkWind", capture.origin + Vector3.UP * .08, {"ground": true, "strength": 1.0})
+	else:
+		hawk.show()
+		projectile.hide()
+		if _fish_ring: _fish_ring.hide()
 	hawk.global_position = capture.actor.global_position + Vector3.UP * y
-	hawk.rotation.x = .6 * (1 - minf(1, capture.elapsed / .35)) if capture.phase == HawkCarryEffect.Phase.MARKED else 0
-	if capture.phase == HawkCarryEffect.Phase.MARKED and capture.elapsed >= .25: _play_hawk("grab")
+	hawk.rotation.x = .6 * (1 - dive_progress) if capture.phase == HawkCarryEffect.Phase.MARKED else 0
+	if capture.phase == HawkCarryEffect.Phase.MARKED and dive_progress >= .7: _play_hawk("grab")
 	if capture.phase == HawkCarryEffect.Phase.CARRY:
 		hawk.rotation.y = PI - capture.orbit_angle
 		hawk.rotation.z = -.12
@@ -274,7 +324,6 @@ func _update_hawk() -> void:
 			if left >= 0 and right >= 0:
 				var claw_center := skeleton.to_global((skeleton.get_bone_global_pose(left).origin + skeleton.get_bone_global_pose(right).origin) * .5)
 				hawk.global_position += capture.grip_position() - claw_center
-	projectile.global_position = capture.actor.global_position + Vector3.UP * lerpf(1.35, .65, capture.inversion)
 	if capture.phase in [HawkCarryEffect.Phase.FALL, HawkCarryEffect.Phase.RECOVER]:
 		projectile.hide()
 		hawk.global_position.y = capture.fall_start + 2.3
@@ -304,11 +353,14 @@ func _effect(name: StringName, point: Vector3, params: Dictionary = {}) -> void:
 func carry_phase_changed(next: int) -> void:
 	match next:
 		HawkCarryEffect.Phase.LIFT:
+			if _fish_ring: _fish_ring.hide()
+			if projectile: projectile.hide()
+			hawk.show()
 			_play_hawk("lift")
 			_flap.pitch_scale = 1
 			_flap.global_position = target.global_position + Vector3.UP * 2
 			_flap.play()
-			_effect(&"HawkWind", target.global_position + Vector3.UP * .15)
+			_effect(&"HawkWind", capture.origin + Vector3.UP * .08, {"ground": true, "strength": 1.4})
 		HawkCarryEffect.Phase.CARRY: _play_hawk("carry_flap")
 		HawkCarryEffect.Phase.FALL:
 			_play_hawk("release")
@@ -322,7 +374,7 @@ func carry_phase_changed(next: int) -> void:
 func landed(point: Vector3, damage: float) -> void:
 	landings += 1
 	actor.combat.spawn_damage_number(point + Vector3.UP, damage, false, 0)
-	_effect(&"HawkLanding", point + Vector3.UP * .07, {"color": Color(.85, .7, .4, .75)})
+	_effect(&"HawkLanding", point + Vector3.UP * .07, {"ground": true, "strength": .55, "color": Color(.85, .75, .55, .5)})
 	_flap.global_position = point
 	_flap.pitch_scale = .65
 	_flap.play()
@@ -343,10 +395,12 @@ func stop() -> void:
 	if is_instance_valid(capture): capture.clear()
 	capture = null
 	phase = Phase.IDLE
-	for node: Node3D in [projectile, hawk]:
+	for node: Node3D in [projectile, hawk, _fish_ring]:
 		if is_instance_valid(node): node.queue_free()
 	projectile = null
 	hawk = null
+	_fish_ring = null
+	_fish_ring_material = null
 	target = null
 	_animation = null
 	_skeleton = null

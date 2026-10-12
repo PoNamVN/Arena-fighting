@@ -16,6 +16,8 @@ var dash_active: bool = false
 var dash_elapsed: float = 0.0
 var dash_direction: Vector3 = Vector3.FORWARD
 var stealth_remaining: float = 0.0
+const ForestEscapeScript := preload("res://scripts/ArcherForestEscape.gd")
+var forest_escape: Node3D
 var _stealth_meshes: Array[GeometryInstance3D] = []
 var _stealth_surfaces: Array[Dictionary] = []
 var _escape_effect: CPUParticles3D
@@ -216,6 +218,10 @@ func _ready() -> void:
 	_escape_effect.top_level = true
 	_collect_stealth_meshes(actor.visuals)
 	_update_bow()
+	forest_escape = ForestEscapeScript.new()
+	forest_escape.combat = self
+	forest_escape.actor = actor
+	actor.add_child(forest_escape)
 
 func handle_input(event: InputEvent) -> void:
 	if event.is_action_pressed("ultimate") and not event.is_echo():
@@ -245,12 +251,10 @@ func start_charge() -> bool:
 		return false
 	if actor.combat_state not in [PlayerController.CombatState.IDLE, PlayerController.CombatState.RUN] or actor._knockback_timer > 0.0:
 		return false
-	end_stealth()
 	charging = true
 	charge_time = 0.0
-	if _hawk_shooting_window():
-		_enter_sky_aim()
-	locked_target = null if sky_aiming else _find_target()
+	_enter_sky_aim()
+	locked_target = null
 	return true
 
 func _hawk_shooting_window() -> bool:
@@ -260,7 +264,7 @@ func _enter_sky_aim() -> void:
 	if sky_aiming: return
 	sky_aiming = true
 	_sky_pitch_rest = actor._camera_pitch
-	actor._camera_pitch = deg_to_rad(50.0)
+	if _hawk_shooting_window(): actor._camera_pitch = deg_to_rad(50.0)
 	actor._update_camera()
 
 func _manual_aim_direction() -> Vector3:
@@ -285,7 +289,6 @@ func start_seeking() -> bool:
 	# Do not spend a targeting skill on empty space or through a wall.
 	if not is_instance_valid(target) or not actor.ability_system.cast_ability("skill_2"):
 		return false
-	end_stealth()
 	seeking_target = target
 	locked_target = target
 	seeking_active = true
@@ -316,8 +319,10 @@ func start_escape() -> bool:
 	dash_direction = dash_direction.normalized()
 	dash_active = true
 	dash_elapsed = 0.0
-	stealth_remaining = 2.5
+	# F2 may clear the live cooldown synchronously inside cast_ability().
+	stealth_remaining = actor.ability_system.get_ability("skill_3").cooldown
 	_set_stealth_visual(true)
+	forest_escape.begin()
 	_escape_effect.global_position = actor.global_position + Vector3(0, 0.6, 0)
 	_escape_effect.restart()
 	if vfx_manager:
@@ -325,13 +330,13 @@ func start_escape() -> bool:
 	return true
 
 func process_escape_movement(delta: float) -> void:
-	var step: float = minf(delta, 0.25 - dash_elapsed)
-	actor.velocity.x = dash_direction.x * 20.0 * step / delta
-	actor.velocity.z = dash_direction.z * 20.0 * step / delta
+	var step: float = minf(delta, ForestEscapeScript.ROLL_SECONDS - dash_elapsed)
+	actor.velocity.x = dash_direction.x * (5.0 / ForestEscapeScript.ROLL_SECONDS) * step / delta
+	actor.velocity.z = dash_direction.z * (5.0 / ForestEscapeScript.ROLL_SECONDS) * step / delta
 	actor.velocity.y -= actor.gravity * delta
 	actor.move_and_slide()
 	dash_elapsed += delta
-	if dash_elapsed >= 0.25:
+	if dash_elapsed >= ForestEscapeScript.ROLL_SECONDS:
 		dash_active = false
 		actor.velocity.x = 0.0
 		actor.velocity.z = 0.0
@@ -437,7 +442,6 @@ func start_counter() -> bool:
 	if offset.length() > RANGE or offset.length() < 0.01:
 		return false
 	interrupt()
-	end_stealth()
 	actor.dodge_controller.cancel_dodge()
 	if not actor.transition_to(PlayerController.CombatState.COUNTER):
 		return false
@@ -515,6 +519,7 @@ func reset() -> void:
 		bait_ultimate.stop()
 	end_stealth()
 	clear_projectiles()
+	if forest_escape: forest_escape.clear()
 	if _escape_effect:
 		_escape_effect.emitting = false
 	recovery_remaining = 0.0
@@ -526,15 +531,7 @@ func release_arrow() -> bool:
 	if not actor.controls_enabled or actor.is_dead or actor._knockback_timer > 0.0:
 		cancel_charge()
 		return false
-	# Revalidate at release: no stale lock through a wall or onto a dead target.
-	if sky_aiming or _hawk_shooting_window() or not _target_valid(locked_target):
-		locked_target = null
-	var origin: Vector3 = actor.global_position + Vector3(0, 1.35, 0)
-	var direction: Vector3 = -actor.camera.global_basis.z if actor.camera else -actor.visuals.global_basis.z
-	if sky_aiming or _hawk_shooting_window():
-		direction = _manual_aim_direction()
-	if is_instance_valid(locked_target):
-		direction = (locked_target.global_position + Vector3(0, 0.9, 0) - origin).normalized()
+	var direction := _manual_aim_direction()
 	var ratio: float = clampf(charge_time / MAX_CHARGE, 0.0, 1.0)
 	var is_crit: bool = ratio >= 0.98
 	_spawn_arrow(direction, lerpf(18.0, 34.0, ratio), lerpf(12.0, 36.0, ratio), true, 15.0, false, null, 0.0, is_crit)
@@ -584,13 +581,16 @@ func _spawn_arrow(direction: Vector3, speed: float, damage: float, basic: bool, 
 	_release_sound.play()
 
 func _physics_process(delta: float) -> void:
-	if not actor.controls_enabled or actor.is_dead or actor.is_control_impaired():
+	if not actor.controls_enabled or actor.is_dead:
 		reset()
 		return
 	if stealth_remaining > 0.0:
 		stealth_remaining = maxf(0.0, stealth_remaining - delta)
 		if stealth_remaining <= 0.0:
 			end_stealth()
+	if actor.is_control_impaired():
+		interrupt()
+		return
 	if seeking_active:
 		seeking_elapsed += delta
 		if not _homing_target_alive(seeking_target) or actor.combat_state not in [PlayerController.CombatState.IDLE, PlayerController.CombatState.RUN] or actor._knockback_timer > 0.0 or not actor._is_mouse_captured:
@@ -612,18 +612,7 @@ func _physics_process(delta: float) -> void:
 			cancel_charge()
 		else:
 			charge_time = minf(MAX_CHARGE, charge_time + delta)
-			if _hawk_shooting_window():
-				_enter_sky_aim()
-			if sky_aiming:
-				locked_target = null
-			elif not _target_valid(locked_target):
-				locked_target = _find_target()
-			if is_instance_valid(locked_target):
-				var to_target: Vector3 = locked_target.global_position - actor.global_position
-				var yaw: float = atan2(-to_target.x, -to_target.z)
-				actor._camera_yaw = lerp_angle(actor._camera_yaw, yaw, minf(1.0, delta * 8.0))
-				actor.camera_pivot.rotation.y = actor._camera_yaw
-				actor.visuals.rotation.y = actor._camera_yaw
+			locked_target = null
 	for i: int in range(_arrows.size() - 1, -1, -1):
 		var data: Dictionary = _arrows[i]
 		var node: Node3D = data.node
@@ -742,6 +731,7 @@ func _impact(target: Object, damage: float, incoming_position: Vector3, position
 			receiver.apply_shield_damage(shield_damage)
 		actual = before - receiver.current_hp
 	if actual > 0.0:
+		end_stealth()
 		hits_landed += 1
 		if basic:
 			actor.stamina_component.add_stamina(actor.stamina_component.attack_stamina_gain)
@@ -813,7 +803,7 @@ func _process(_delta: float) -> void:
 	if _label and bait_ultimate.active():
 		_label.text += "\n" + bait_ultimate.status()
 	if _label and sky_aiming:
-		_label.text = "NGẮM LÊN TRỜI · THẢ CHUỘT TRÁI ĐỂ BẮN"
+		_label.text = "NGẮM TỰ DO · THẢ CHUỘT TRÁI ĐỂ BẮN"
 	elif _label and _hawk_shooting_window():
 		_label.text += "\nGIỮ CHUỘT TRÁI · NGẮM LÊN TRỜI"
 	if _label and seeking_active:

@@ -1542,6 +1542,12 @@ func _exit_tree() -> void:
 	_restore_z_shield_visual(true)
 
 func _start_shield_charge(ability: AbilityData) -> void:
+	# Z replaces the basic attack clip, so it must also release the combo state.
+	if combat_state == CombatState.ATTACK:
+		var old_state: CombatState = combat_state
+		combat_state = CombatState.IDLE
+		state_changed.emit(old_state, combat_state)
+	reset_combo()
 	_charge_distance = 0.0
 	_charge_clock = 0.0
 	_enlarge_giant_shield()
@@ -2241,8 +2247,6 @@ func take_damage(amount_or_payload: Variant, attacker_pos: Vector3 = NO_ATTACKER
 
 	last_hit_was_blocked = was_blocked
 
-	if final_damage > 0.0 and archer_combat:
-		archer_combat.end_stealth()
 	if attack_payload is AttackPayload and health_component and not health_component.ability_invulnerable and not health_component.training_invulnerable:
 		attack_payload.outcome = &"blocked" if was_blocked else &"hit"
 	var will_die: bool = (health_component and health_component.current_health - final_damage <= 0.0)
@@ -2296,7 +2300,6 @@ func apply_hit_reaction(hit_dir: Vector3, is_blocked_hit: bool = false) -> void:
 		wizard_combat.interrupt()
 	if archer_combat:
 		archer_combat.interrupt()
-		archer_combat.end_stealth()
 	_hit_reaction_count += 1
 	# Hit reaction clears queued combo input but cannot bypass finisher recovery.
 	reset_combo(false)
@@ -2687,6 +2690,8 @@ func _on_animation_finished(anim_name: StringName) -> void:
 
 
 func _update_locomotion_animations() -> void:
+	if archer_combat and archer_combat.forest_escape and archer_combat.forest_escape.owns_locomotion():
+		return
 	if hawk_carry and hawk_carry.active(): return
 	if is_ragdoll_active():
 		return

@@ -49,6 +49,7 @@ func fresh() -> void:
 func fire(charge_frames: int = 75) -> void:
 	action("attack", true)
 	await frames(charge_frames)
+	player.camera.look_at(enemy.global_position + Vector3.UP * .9)
 	action("attack", false)
 	await frames(1)
 
@@ -65,10 +66,11 @@ func _run() -> void:
 	player._release_block()
 	action("attack", true)
 	await frames(8)
-	check(bow.charging and bow.locked_target == enemy, "Real LMB press charges and acquires visible enemy")
+	check(bow.charging and bow.locked_target == null and bow.sky_aiming, "Real LMB press enters manual aim without target lock")
 	check(bow.shots_fired == 0 and is_equal_approx(enemy.health_component.current_health, 500), "Holding does not cause melee or auto fire")
 	await frames(90)
 	check(is_equal_approx(bow.charge_time, bow.MAX_CHARGE), "Charge caps while held")
+	player.camera.look_at(enemy.global_position + Vector3.UP * .9)
 	action("attack", false)
 	await frames(1)
 	check(bow.shots_fired == 1 and bow._arrows.size() == 1, "Release creates one moving arrow")
@@ -129,6 +131,9 @@ func _run() -> void:
 	action("attack", false)
 	check(not bow.charging and bow.shots_fired == 0, "Taking a hit cancels charged shot")
 	await frames(15)
+	for tick in range(120):
+		if not player.is_control_impaired(): break
+		await frames(1)
 	player.stamina_component.current_stamina = 100
 	action("attack", true)
 	await frames(3)
@@ -153,7 +158,7 @@ func _run() -> void:
 	enemy.position.z = -5.0
 	await frames(2)
 	bow.start_charge()
-	check(bow.locked_target == enemy, "Visible target is reacquired on new charge")
+	check(bow.locked_target == null, "New charge never reacquires an automatic target")
 	wall = StaticBody3D.new()
 	arena.add_child(wall)
 	wall.collision_layer = 1

@@ -106,7 +106,6 @@ func active() -> bool:
 func begin() -> bool:
 	if active() or not actor.archer_combat._can_skill() or not actor.ability_system.can_cast("ultimate"):
 		return false
-	actor.archer_combat.end_stealth()
 	_showcase = false
 	phase = Phase.AIM
 	elapsed = 0.0

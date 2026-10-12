@@ -13,7 +13,7 @@ func _run() -> void:
 	check(not bow.reticle_hud.visible, "Normal TPS hides the reticle")
 	bow.start_charge()
 	await frames(2)
-	check(not bow.reticle_hud.visible, "Ordinary TPS charge also hides the reticle")
+	check(bow.reticle_hud.visible and bow.sky_aiming, "Ordinary TPS charge uses the shared Z aim reticle")
 	bow.cancel_charge()
 	check(bow.start_hawk(), "Z starts normally")
 	for i in range(180):
@@ -58,6 +58,9 @@ func _run() -> void:
 	player.controls_enabled = true
 	await frames(2)
 	await snapshot("fps_idle")
+	# Shoot from arena centre so the fast broad orbit stays inside basic-arrow range.
+	player.position = Vector3(0, .1, 0)
+	await frames(2)
 	bow.start_hawk()
 	for i in range(180):
 		await frames(1)
@@ -70,7 +73,8 @@ func _run() -> void:
 	var origin := player.global_position + Vector3(0, 1.35, 0)
 	var point := enemy.global_position + Vector3.UP * .9
 	for i in range(6):
-		var flight := origin.distance_to(point) / 34.0
+		# Basic arrows query the victim's position before its next physics step.
+		var flight := (floorf(origin.distance_to(point) / 34.0 * 60.0) - 1.0) / 60.0
 		point = enemy.hawk_carry.orbit_position(enemy.hawk_carry.elapsed + flight) + Vector3.UP * .9
 	player.camera.look_at(point)
 	var direction := bow._manual_aim_direction()
@@ -82,7 +86,7 @@ func _run() -> void:
 	await frames(600)
 	check(not bow.sky_aiming and not enemy.hawk_carry.active(), "Aerial aim and carry clean up")
 	bow = await fresh_volley()
-	check(bow.start_charge() and bow.locked_target == enemy and not bow.sky_aiming, "Ordinary basic shots keep their existing targeting")
+	check(bow.start_charge() and bow.locked_target == null and bow.sky_aiming, "Ordinary basic shots use manual Z aim without target lock")
 	bow.cancel_charge()
 	arena.queue_free()
 	await frames(3)

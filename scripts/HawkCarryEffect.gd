@@ -3,6 +3,8 @@ extends Node
 
 enum Phase { IDLE, MARKED, LIFT, CARRY, FALL, RECOVER }
 const HEIGHT := 14.0
+const MARK_SECONDS := .9
+const DIVE_SECONDS := .35
 const LIFT_SECONDS := 1.1
 const CIRCLE_SECONDS := 8.0
 const ORBIT_SPEED_MULTIPLIER := 6.0
@@ -150,12 +152,12 @@ func step(delta: float) -> void:
 		return
 	elapsed += delta
 	total_elapsed += delta
-	if total_elapsed > LIFT_SECONDS + CIRCLE_SECONDS + 3.2:
+	if total_elapsed > MARK_SECONDS + LIFT_SECONDS + CIRCLE_SECONDS + 3.2:
 		clear()
 		return
 	match phase:
 		Phase.MARKED:
-			if elapsed >= .35: _set_phase(Phase.LIFT)
+			if elapsed >= MARK_SECONDS: _set_phase(Phase.LIFT)
 		Phase.LIFT:
 			var goal := origin + Vector3.UP * HEIGHT * smoothstep(0, 1, minf(1, elapsed / LIFT_SECONDS))
 			if not _move_to(goal):

@@ -106,7 +106,6 @@ func cancel_actions() -> void:
 			player.active_ability_action.cancel()
 		if player.archer_combat:
 			player.archer_combat.interrupt()
-			player.archer_combat.end_stealth()
 		if player.wizard_combat:
 			player.wizard_combat.interrupt()
 		player.dodge_controller.reset()
